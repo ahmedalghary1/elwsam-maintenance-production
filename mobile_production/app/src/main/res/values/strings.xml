@@ -1,0 +1,19 @@
+<resources>
+    <string name="app_name">الإنتاج والأعطال</string>
+    <string name="login_title">تسجيل دخول مشرف الإنتاج</string>
+    <string name="login_subtitle">نظام تسجيل الورديات ومتابعة الأعطال</string>
+    <string name="phone_label">رقم الهاتف</string>
+    <string name="password_label">كلمة المرور</string>
+    <string name="login_button">دخول للنظام</string>
+    <string name="shift_title">تسجيل وردية الإنتاج</string>
+    <string name="shift_first">الوردية الأولى (صباحية)</string>
+    <string name="shift_second">الوردية الثانية (مسائية)</string>
+    <string name="shift_third">الوردية الثالثة (ليلية)</string>
+    <string name="friday_prayer_stop">إيقاف صلاة الجمعة لجميع الماكينات</string>
+    <string name="add_stoppage">تسجيل عطل أو توقف</string>
+    <string name="finish_shift">إنهاء الوردية وتسليمها للمشرف التالي</string>
+    <string name="confirm_handover_title">استلام وردية سابقة</string>
+    <string name="product_changed_warning">⚠️ تم تغيير المنتج عن الافتراضي</string>
+    <string name="sync_status_online">متصل بالسيرفر</string>
+    <string name="sync_status_offline">يعمل بدون إنترنت (سيتم المزامنة تلقائياً)</string>
+</resources>

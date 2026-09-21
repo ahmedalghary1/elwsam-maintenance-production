@@ -1,0 +1,6 @@
+<resources>
+    <style name="Theme.ProductionSupervisor" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">#1B3B4B</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>
