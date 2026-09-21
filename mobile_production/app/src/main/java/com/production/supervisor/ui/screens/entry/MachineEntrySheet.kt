@@ -164,36 +164,38 @@ fun MachineEntrySheet(
                 }
             }
             Spacer(modifier = Modifier.height(6.dp))
-            OutlinedTextField(
-                value = operatorNameText,
-                onValueChange = {
-                    operatorNameText = it
-                    selectedOperator = operators.find { op -> op.name == it.trim() }
-                },
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("اختر من القائمة أو اكتب اسم العامل يدوي") },
-                leadingIcon = { Icon(Icons.Outlined.Person, contentDescription = null, tint = FactoryNavy) },
-                trailingIcon = {
-                    IconButton(onClick = { showOperatorDropdown = true }) {
-                        Icon(Icons.Default.ArrowDropDown, contentDescription = "قائمة العمال", tint = FactoryNavy)
-                    }
-                },
-                shape = RoundedCornerShape(12.dp),
-                singleLine = true
-            )
-            DropdownMenu(
-                expanded = showOperatorDropdown,
-                onDismissRequest = { showOperatorDropdown = false }
-            ) {
-                operators.forEach { op ->
-                    DropdownMenuItem(
-                        text = { Text(op.name, fontWeight = FontWeight.Medium) },
-                        onClick = {
-                            selectedOperator = op
-                            operatorNameText = op.name
-                            showOperatorDropdown = false
+            Box(modifier = Modifier.fillMaxWidth()) {
+                OutlinedTextField(
+                    value = operatorNameText,
+                    onValueChange = {
+                        operatorNameText = it
+                        selectedOperator = operators.find { op -> op.name == it.trim() }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("اختر من القائمة أو اكتب اسم العامل يدوي") },
+                    leadingIcon = { Icon(Icons.Outlined.Person, contentDescription = null, tint = FactoryNavy) },
+                    trailingIcon = {
+                        IconButton(onClick = { showOperatorDropdown = true }) {
+                            Icon(Icons.Default.ArrowDropDown, contentDescription = "قائمة العمال", tint = FactoryNavy)
                         }
-                    )
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    singleLine = true
+                )
+                DropdownMenu(
+                    expanded = showOperatorDropdown,
+                    onDismissRequest = { showOperatorDropdown = false }
+                ) {
+                    operators.forEach { op ->
+                        DropdownMenuItem(
+                            text = { Text(op.name, fontWeight = FontWeight.Medium) },
+                            onClick = {
+                                selectedOperator = op
+                                operatorNameText = op.name
+                                showOperatorDropdown = false
+                            }
+                        )
+                    }
                 }
             }
 
@@ -244,36 +246,38 @@ fun MachineEntrySheet(
                 }
             }
             Spacer(modifier = Modifier.height(6.dp))
-            OutlinedTextField(
-                value = productNameText,
-                onValueChange = {
-                    productNameText = it
-                    selectedProduct = products.find { prod -> prod.name == it.trim() }
-                },
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("اختر من القائمة أو اكتب اسم المنتج يدوي") },
-                leadingIcon = { Icon(Icons.Outlined.Inventory2, contentDescription = null, tint = FactoryNavy) },
-                trailingIcon = {
-                    IconButton(onClick = { showProductDropdown = true }) {
-                        Icon(Icons.Default.ArrowDropDown, contentDescription = "قائمة المنتجات", tint = FactoryNavy)
-                    }
-                },
-                shape = RoundedCornerShape(12.dp),
-                singleLine = true
-            )
-            DropdownMenu(
-                expanded = showProductDropdown,
-                onDismissRequest = { showProductDropdown = false }
-            ) {
-                products.forEach { prod ->
-                    DropdownMenuItem(
-                        text = { Text(prod.name, fontWeight = FontWeight.Medium) },
-                        onClick = {
-                            selectedProduct = prod
-                            productNameText = prod.name
-                            showProductDropdown = false
+            Box(modifier = Modifier.fillMaxWidth()) {
+                OutlinedTextField(
+                    value = productNameText,
+                    onValueChange = {
+                        productNameText = it
+                        selectedProduct = products.find { prod -> prod.name == it.trim() }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("اختر من القائمة أو اكتب اسم المنتج يدوي") },
+                    leadingIcon = { Icon(Icons.Outlined.Inventory2, contentDescription = null, tint = FactoryNavy) },
+                    trailingIcon = {
+                        IconButton(onClick = { showProductDropdown = true }) {
+                            Icon(Icons.Default.ArrowDropDown, contentDescription = "قائمة المنتجات", tint = FactoryNavy)
                         }
-                    )
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    singleLine = true
+                )
+                DropdownMenu(
+                    expanded = showProductDropdown,
+                    onDismissRequest = { showProductDropdown = false }
+                ) {
+                    products.forEach { prod ->
+                        DropdownMenuItem(
+                            text = { Text(prod.name, fontWeight = FontWeight.Medium) },
+                            onClick = {
+                                selectedProduct = prod
+                                productNameText = prod.name
+                                showProductDropdown = false
+                            }
+                        )
+                    }
                 }
             }
 

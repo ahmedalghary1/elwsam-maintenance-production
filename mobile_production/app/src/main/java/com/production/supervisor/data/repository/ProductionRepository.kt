@@ -50,6 +50,7 @@ class ProductionRepository @Inject constructor(
                         isActive = dto.isActive
                     )
                 }
+                dao.deleteAllAssets()
                 dao.insertAssets(assetEntities)
 
                 // Map and insert Products
@@ -62,6 +63,7 @@ class ProductionRepository @Inject constructor(
                         isActive = dto.isActive
                     )
                 }
+                dao.deleteAllProducts()
                 dao.insertProducts(productEntities)
 
                 // Map and insert Operators
@@ -73,6 +75,7 @@ class ProductionRepository @Inject constructor(
                         isActive = dto.isActive
                     )
                 }
+                dao.deleteAllOperators()
                 dao.insertOperators(operatorEntities)
 
                 Result.success(data.pendingHandover)

@@ -16,6 +16,9 @@ interface ProductionDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAssets(assets: List<AssetEntity>)
 
+    @Query("DELETE FROM assets")
+    suspend fun deleteAllAssets()
+
     @Query("SELECT * FROM products WHERE isActive = 1 ORDER BY name ASC")
     fun getProductsFlow(): Flow<List<ProductEntity>>
 
@@ -25,6 +28,9 @@ interface ProductionDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertProducts(products: List<ProductEntity>)
 
+    @Query("DELETE FROM products")
+    suspend fun deleteAllProducts()
+
     @Query("SELECT * FROM operators WHERE isActive = 1 ORDER BY name ASC")
     fun getOperatorsFlow(): Flow<List<OperatorEntity>>
 
@@ -33,6 +39,9 @@ interface ProductionDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertOperators(operators: List<OperatorEntity>)
+
+    @Query("DELETE FROM operators")
+    suspend fun deleteAllOperators()
 
     @Query("SELECT * FROM shift_reports WHERE clientReportId = :reportId")
     fun getShiftReportFlow(reportId: String): Flow<ShiftReportEntity?>
