@@ -156,6 +156,22 @@ class MachineProductionEntry(models.Model):
     def __str__(self):
         return f"{self.asset.asset_code} - {self.product_name or 'بدون منتج'}"
 
+    @property
+    def display_operator(self):
+        if self.operator_name:
+            return self.operator_name
+        if self.operator_id and self.operator:
+            return self.operator.name
+        return "-"
+
+    @property
+    def display_product(self):
+        if self.product_name:
+            return self.product_name
+        if self.product_id and self.product:
+            return self.product.name
+        return "-"
+
 
 class ProductionStoppage(models.Model):
     class StoppageType(models.TextChoices):

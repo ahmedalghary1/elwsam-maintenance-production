@@ -108,6 +108,9 @@ def home(request):
     stoppages_count = today_stoppages.count()
     total_stoppage_mins = today_stoppages.aggregate(s=Sum("duration_minutes"))["s"] or 0
 
+    today_product_changes = today_entries.filter(product_changed=True).count()
+    today_operator_changes = today_entries.filter(operator_changed=True).count()
+
     pending_handovers = reports_qs.filter(
         status=ProductionShiftReport.Status.PENDING_HANDOVER
     ).select_related("supervisor", "factory").order_by("-created_at")[:5]
@@ -127,6 +130,8 @@ def home(request):
         "total_machines": total_machines,
         "stoppages_count": stoppages_count,
         "total_stoppage_mins": total_stoppage_mins,
+        "today_product_changes": today_product_changes,
+        "today_operator_changes": today_operator_changes,
         "pending_handovers": pending_handovers,
         "recent_reports": recent_reports,
     }

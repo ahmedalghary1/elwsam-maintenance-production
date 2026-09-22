@@ -160,6 +160,11 @@ class ProductionSyncReportView(APIView):
                     prod_changed = True
                 elif selected_prod_name and default_prod_name and selected_prod_name.strip() != default_prod_name.strip():
                     prod_changed = True
+                elif orig_prod_name and selected_prod_name and orig_prod_name.strip() != selected_prod_name.strip():
+                    prod_changed = True
+
+                if prod_changed and not orig_prod_name:
+                    orig_prod_name = default_prod_name or "الافتراضي غير محدد"
 
                 # Detect if operator was changed from default
                 default_op_id = default_cfg.default_operator_id if default_cfg else None
@@ -178,6 +183,9 @@ class ProductionSyncReportView(APIView):
                     op_changed = True
                 elif orig_op_name and selected_op_name and orig_op_name.strip() != selected_op_name.strip():
                     op_changed = True
+
+                if op_changed and not orig_op_name:
+                    orig_op_name = default_op_name or "الافتراضي غير محدد"
 
                 entries_to_create.append(MachineProductionEntry(
                     report=report,

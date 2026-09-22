@@ -324,15 +324,17 @@ fun ProductionHomeScreen(
     // Machine Entry Sheet
     uiState.selectedAssetForEntry?.let { asset ->
         val existingEntry = uiState.entries[asset.id]
-        MachineEntrySheet(
-            asset = asset,
-            currentReportId = uiState.currentReportId,
-            existingEntry = existingEntry,
-            operators = uiState.operators,
-            products = uiState.products,
-            onDismiss = { viewModel.closeMachineEntry() },
-            onSave = { entry -> viewModel.saveMachineEntry(entry) }
-        )
+        key(asset.id) {
+            MachineEntrySheet(
+                asset = asset,
+                currentReportId = uiState.currentReportId,
+                existingEntry = existingEntry,
+                operators = uiState.operators,
+                products = uiState.products,
+                onDismiss = { viewModel.closeMachineEntry() },
+                onSave = { entry -> viewModel.saveMachineEntry(entry) }
+            )
+        }
     }
 
     // Stoppage Dialog

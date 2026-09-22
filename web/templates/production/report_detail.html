@@ -119,24 +119,32 @@
           </td>
           <td>
             {% if entry.operator_changed %}
-              <div class="badge-changed" title="تم تغيير القائم على الماكينة">
-                {% icon "stoppage" %} تم التغيير:
-                <del style="opacity:0.75;">{{ entry.original_operator_name|default:"-" }}</del>
-                ➔ <strong>{{ entry.operator_name|default:entry.operator.name }}</strong>
+              <div class="badge-changed-card" title="تم تغيير القائم على الماكينة عن المعتاد">
+                <div class="badge-changed-header">
+                  {% icon "stoppage" %} <span>تم تغيير العامل!</span>
+                </div>
+                <div class="badge-changed-body">
+                  <span class="changed-from">كانت القيمة: <del>{{ entry.original_operator_name|default:"-" }}</del></span>
+                  <span class="changed-to">وتم تغييرها إلى: <strong>{{ entry.display_operator }}</strong></span>
+                </div>
               </div>
             {% else %}
-              <strong>{{ entry.operator_name|default:entry.operator.name|default:"-" }}</strong>
+              <strong>{{ entry.display_operator }}</strong>
             {% endif %}
           </td>
           <td>
             {% if entry.product_changed %}
-              <div class="badge-changed" title="تم تغيير المنتج عن المعتاد بالماكينة">
-                {% icon "stoppage" %} تم التغيير:
-                <del style="opacity:0.75;">{{ entry.original_product_name|default:"-" }}</del>
-                ➔ <strong>{{ entry.product_name|default:entry.product.name }}</strong>
+              <div class="badge-changed-card" title="تم تغيير المنتج عن المعتاد بالماكينة">
+                <div class="badge-changed-header">
+                  {% icon "stoppage" %} <span>تم تغيير المنتج!</span>
+                </div>
+                <div class="badge-changed-body">
+                  <span class="changed-from">كانت القيمة: <del>{{ entry.original_product_name|default:"-" }}</del></span>
+                  <span class="changed-to">وتم تغييرها إلى: <strong>{{ entry.display_product }}</strong></span>
+                </div>
               </div>
             {% else %}
-              <strong>{{ entry.product_name|default:entry.product.name|default:"-" }}</strong>
+              <strong>{{ entry.display_product }}</strong>
             {% endif %}
           </td>
           <td>

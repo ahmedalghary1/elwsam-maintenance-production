@@ -271,4 +271,49 @@ class ProductionAPITestCase(TestCase):
         detail_res = client1.get(reverse("production:report_detail", args=[report_f2.id]))
         self.assertEqual(detail_res.status_code, 404)
 
+    def test_report_detail_displays_changed_values_clearly(self):
+        from django.test import Client
+        report = ProductionShiftReport.objects.create(
+            client_report_id=str(uuid.uuid4()),
+            factory=self.factory,
+            supervisor=self.supervisor1,
+            shift="FIRST",
+            report_date=timezone.localdate(),
+        )
+        MachineProductionEntry.objects.create(
+            report=report,
+            asset=self.asset1,
+            operator_name="أحمد محمود",
+            original_operator_name="محمد علي",
+            operator_changed=True,
+            product_name="جركن 20 لتر جديد",
+            original_product_name="جركن 10 لتر قديم",
+            product_changed=True,
+            final_production_weight_kg=150.0,
+        )
+
+        client = Client()
+        client.force_login(self.supervisor1)
+
+        # 1. Check report detail page displays explicit change text
+        res = client.get(reverse("production:report_detail", args=[report.id]))
+        self.assertEqual(res.status_code, 200)
+        content = res.content.decode("utf-8")
+        self.assertIn("تم تغيير العامل!", content)
+        self.assertIn("كانت القيمة:", content)
+        self.assertIn("محمد علي", content)
+        self.assertIn("أحمد محمود", content)
+        self.assertIn("تم تغيير المنتج!", content)
+        self.assertIn("جركن 10 لتر قديم", content)
+        self.assertIn("جركن 20 لتر جديد", content)
+        self.assertIn("وتم تغييرها إلى:", content)
+
+        # 2. Check home dashboard reflects changes in stats and recent reports
+        home_res = client.get(reverse("production:home"))
+        self.assertEqual(home_res.status_code, 200)
+        home_content = home_res.content.decode("utf-8")
+        self.assertIn("تغييرات العمال والمنتجات اليوم", home_content)
+        self.assertIn("تغيير منتج", home_content)
+        self.assertIn("تغيير عامل", home_content)
+
 

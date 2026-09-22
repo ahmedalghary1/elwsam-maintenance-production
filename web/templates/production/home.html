@@ -40,7 +40,18 @@
     <strong style="color: {% if stoppages_count > 0 %}var(--error){% else %}var(--success){% endif %};">
       {{ stoppages_count }} <small style="font-size:16px;">توقف ({{ total_stoppage_mins }} دقيقة)</small>
     </strong>
-    <small>تشمل أعطال الماكينات والتوقفات العامة (مثل صلاة الجمعة)</small>
+    <small>تشمل أعطال الماكينات والتوقفات العامة</small>
+  </article>
+  <article>
+    <span>تغييرات العمال والمنتجات اليوم</span>
+    <strong style="color: {% if today_product_changes > 0 or today_operator_changes > 0 %}#d35400{% else %}var(--muted){% endif %};">
+      {% if today_product_changes > 0 or today_operator_changes > 0 %}
+        {{ today_product_changes }} منتج · {{ today_operator_changes }} عامل
+      {% else %}
+        0
+      {% endif %}
+    </strong>
+    <small>تغييرات تمت بالماكينات عن المسجل بالداشبورد</small>
   </article>
 </div>
 
@@ -113,7 +124,25 @@
           <td><strong>{{ rep.report_date }}</strong></td>
           <td><b>{{ rep.get_shift_display }}</b></td>
           <td>{{ rep.supervisor.display_name }}</td>
-          <td>{{ rep.machine_entries.count }} ماكينة</td>
+          <td>
+            <strong>{{ rep.machine_entries.count }}</strong> ماكينة
+            {% with p_count=rep.changed_products_count o_count=rep.changed_operators_count %}
+              {% if p_count or o_count %}
+                <div style="margin-top:4px; display:flex; gap:4px; flex-wrap:wrap;">
+                  {% if p_count %}
+                    <span class="badge warning" style="font-size:10px; padding:1px 5px;" title="تم تغيير المنتج عن الافتراضي بالماكينة">
+                      {{ p_count }} تغيير منتج
+                    </span>
+                  {% endif %}
+                  {% if o_count %}
+                    <span class="badge warning" style="font-size:10px; padding:1px 5px;" title="تم تغيير العامل عن الافتراضي بالماكينة">
+                      {{ o_count }} تغيير عامل
+                    </span>
+                  {% endif %}
+                </div>
+              {% endif %}
+            {% endwith %}
+          </td>
           <td><strong>{{ rep.total_weight }} كجم</strong></td>
           <td>
             {% if rep.status == 'CONFIRMED' %}

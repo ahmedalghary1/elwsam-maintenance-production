@@ -42,62 +42,62 @@ fun MachineEntrySheet(
     // Initial values
     val defaultOp = operators.find { it.id == asset.defaultOperatorId }
     val initialOperatorName = existingEntry?.operatorName?.ifBlank { null }
-        ?: asset.defaultOperatorName
+        ?: asset.defaultOperatorName?.takeIf { it.isNotBlank() }
         ?: defaultOp?.name
         ?: ""
 
-    var operatorNameText by remember { mutableStateOf(initialOperatorName) }
-    var selectedOperator by remember {
+    var operatorNameText by remember(asset.id, existingEntry?.id) { mutableStateOf(initialOperatorName) }
+    var selectedOperator by remember(asset.id, existingEntry?.id) {
         mutableStateOf(operators.find { it.name == initialOperatorName } ?: defaultOp)
     }
 
     val defaultProd = products.find { it.id == asset.defaultProductId }
     val initialProductName = existingEntry?.productName?.ifBlank { null }
-        ?: asset.defaultProductName
+        ?: asset.defaultProductName?.takeIf { it.isNotBlank() }
         ?: defaultProd?.name
         ?: ""
 
-    var productNameText by remember { mutableStateOf(initialProductName) }
-    var selectedProduct by remember {
+    var productNameText by remember(asset.id, existingEntry?.id) { mutableStateOf(initialProductName) }
+    var selectedProduct by remember(asset.id, existingEntry?.id) {
         mutableStateOf(products.find { it.name == initialProductName } ?: defaultProd)
     }
 
-    val originalOperatorDisplayName = asset.defaultOperatorName
-        ?: existingEntry?.originalOperatorName?.ifBlank { null }
+    val originalOperatorDisplayName = asset.defaultOperatorName?.takeIf { it.isNotBlank() }
         ?: defaultOp?.name
+        ?: existingEntry?.originalOperatorName?.ifBlank { null }
         ?: ""
 
     val isOperatorChanged = originalOperatorDisplayName.isNotBlank() &&
             operatorNameText.trim().isNotBlank() &&
             operatorNameText.trim() != originalOperatorDisplayName.trim()
 
-    val originalProductDisplayName = asset.defaultProductName
-        ?: existingEntry?.originalProductName?.ifBlank { null }
+    val originalProductDisplayName = asset.defaultProductName?.takeIf { it.isNotBlank() }
         ?: defaultProd?.name
+        ?: existingEntry?.originalProductName?.ifBlank { null }
         ?: ""
 
     val isProductChanged = originalProductDisplayName.isNotBlank() &&
             productNameText.trim().isNotBlank() &&
             productNameText.trim() != originalProductDisplayName.trim()
 
-    var currentCavitiesText by remember {
+    var currentCavitiesText by remember(asset.id, existingEntry?.id) {
         mutableStateOf(
             existingEntry?.currentCavities?.toString() ?: asset.originalCavities.toString()
         )
     }
-    var operationMode by remember {
+    var operationMode by remember(asset.id, existingEntry?.id) {
         mutableStateOf(existingEntry?.operationMode ?: "AUTO")
     }
-    var rawMaterial by remember {
+    var rawMaterial by remember(asset.id, existingEntry?.id) {
         mutableStateOf(existingEntry?.rawMaterial ?: "")
     }
-    var weightText by remember {
+    var weightText by remember(asset.id, existingEntry?.id) {
         mutableStateOf(existingEntry?.finalProductionWeightKg?.let { if (it > 0) it.toString() else "" } ?: "")
     }
-    var packagingType by remember {
+    var packagingType by remember(asset.id, existingEntry?.id) {
         mutableStateOf(existingEntry?.packagingType ?: "كراتين")
     }
-    var notes by remember {
+    var notes by remember(asset.id, existingEntry?.id) {
         mutableStateOf(existingEntry?.notes ?: "")
     }
 
@@ -157,9 +157,10 @@ fun MachineEntrySheet(
                 )
                 if (originalOperatorDisplayName.isNotBlank()) {
                     Text(
-                        text = "المعتاد: $originalOperatorDisplayName",
+                        text = "المعتاد بالداشبورد: $originalOperatorDisplayName",
                         fontSize = 11.sp,
-                        color = FactoryTextMuted
+                        fontWeight = FontWeight.Medium,
+                        color = FactoryNavy
                     )
                 }
             }
@@ -175,7 +176,7 @@ fun MachineEntrySheet(
                     placeholder = { Text("اختر من القائمة أو اكتب اسم العامل يدوي") },
                     leadingIcon = { Icon(Icons.Outlined.Person, contentDescription = null, tint = FactoryNavy) },
                     trailingIcon = {
-                        IconButton(onClick = { showOperatorDropdown = true }) {
+                        IconButton(onClick = { showOperatorDropdown = !showOperatorDropdown }) {
                             Icon(Icons.Default.ArrowDropDown, contentDescription = "قائمة العمال", tint = FactoryNavy)
                         }
                     },
@@ -184,9 +185,41 @@ fun MachineEntrySheet(
                 )
                 DropdownMenu(
                     expanded = showOperatorDropdown,
-                    onDismissRequest = { showOperatorDropdown = false }
+                    onDismissRequest = { showOperatorDropdown = false },
+                    modifier = Modifier.fillMaxWidth(0.9f)
                 ) {
-                    operators.forEach { op ->
+                    if (originalOperatorDisplayName.isNotBlank()) {
+                        DropdownMenuItem(
+                            text = {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(originalOperatorDisplayName, fontWeight = FontWeight.Bold, color = FactoryNavy)
+                                    Surface(
+                                        color = FactoryLightOrange,
+                                        shape = RoundedCornerShape(6.dp)
+                                    ) {
+                                        Text(
+                                            "الافتراضي بالداشبورد ⭐",
+                                            fontSize = 10.sp,
+                                            color = FactoryOrangeDark,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                            },
+                            onClick = {
+                                operatorNameText = originalOperatorDisplayName
+                                selectedOperator = operators.find { it.name == originalOperatorDisplayName } ?: defaultOp
+                                showOperatorDropdown = false
+                            }
+                        )
+                        HorizontalDivider()
+                    }
+                    operators.filter { it.name != originalOperatorDisplayName }.forEach { op ->
                         DropdownMenuItem(
                             text = { Text(op.name, fontWeight = FontWeight.Medium) },
                             onClick = {
@@ -214,7 +247,7 @@ fun MachineEntrySheet(
                         Icon(Icons.Outlined.Warning, contentDescription = null, tint = FactoryOrangeDark, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "تم تغيير القائم على الماكينة!\nالأصلي: $originalOperatorDisplayName ➡ الجديد: ${operatorNameText.trim()}",
+                            text = "⚠️ تم تغيير القائم على الماكينة!\nكانت القيمة: $originalOperatorDisplayName ➔ وتم تغييرها إلى: ${operatorNameText.trim()}",
                             color = FactoryOrangeDark,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
@@ -239,9 +272,10 @@ fun MachineEntrySheet(
                 )
                 if (originalProductDisplayName.isNotBlank()) {
                     Text(
-                        text = "المعتاد: $originalProductDisplayName",
+                        text = "المعتاد بالداشبورد: $originalProductDisplayName",
                         fontSize = 11.sp,
-                        color = FactoryTextMuted
+                        fontWeight = FontWeight.Medium,
+                        color = FactoryNavy
                     )
                 }
             }
@@ -257,7 +291,7 @@ fun MachineEntrySheet(
                     placeholder = { Text("اختر من القائمة أو اكتب اسم المنتج يدوي") },
                     leadingIcon = { Icon(Icons.Outlined.Inventory2, contentDescription = null, tint = FactoryNavy) },
                     trailingIcon = {
-                        IconButton(onClick = { showProductDropdown = true }) {
+                        IconButton(onClick = { showProductDropdown = !showProductDropdown }) {
                             Icon(Icons.Default.ArrowDropDown, contentDescription = "قائمة المنتجات", tint = FactoryNavy)
                         }
                     },
@@ -266,9 +300,41 @@ fun MachineEntrySheet(
                 )
                 DropdownMenu(
                     expanded = showProductDropdown,
-                    onDismissRequest = { showProductDropdown = false }
+                    onDismissRequest = { showProductDropdown = false },
+                    modifier = Modifier.fillMaxWidth(0.9f)
                 ) {
-                    products.forEach { prod ->
+                    if (originalProductDisplayName.isNotBlank()) {
+                        DropdownMenuItem(
+                            text = {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(originalProductDisplayName, fontWeight = FontWeight.Bold, color = FactoryNavy)
+                                    Surface(
+                                        color = FactoryLightOrange,
+                                        shape = RoundedCornerShape(6.dp)
+                                    ) {
+                                        Text(
+                                            "الافتراضي بالداشبورد ⭐",
+                                            fontSize = 10.sp,
+                                            color = FactoryOrangeDark,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                            },
+                            onClick = {
+                                productNameText = originalProductDisplayName
+                                selectedProduct = products.find { it.name == originalProductDisplayName } ?: defaultProd
+                                showProductDropdown = false
+                            }
+                        )
+                        HorizontalDivider()
+                    }
+                    products.filter { it.name != originalProductDisplayName }.forEach { prod ->
                         DropdownMenuItem(
                             text = { Text(prod.name, fontWeight = FontWeight.Medium) },
                             onClick = {
@@ -296,7 +362,7 @@ fun MachineEntrySheet(
                         Icon(Icons.Outlined.Warning, contentDescription = null, tint = FactoryOrangeDark, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "تم تغيير المنتج عن المعتاد!\nالأصلي: $originalProductDisplayName ➡ الجديد: ${productNameText.trim()}",
+                            text = "⚠️ تم تغيير المنتج عن المعتاد!\nكانت القيمة: $originalProductDisplayName ➔ وتم تغييرها إلى: ${productNameText.trim()}",
                             color = FactoryOrangeDark,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
@@ -361,32 +427,54 @@ fun MachineEntrySheet(
             ) {
                 Button(
                     onClick = { operationMode = "AUTO" },
-                    modifier = Modifier.weight(1f).height(46.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(58.dp),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (operationMode == "AUTO") FactoryGreen else FactorySurfaceVariant,
                         contentColor = if (operationMode == "AUTO") Color.White else FactoryTextSecondary
                     ),
-                    border = if (operationMode == "AUTO") null else androidx.compose.foundation.BorderStroke(1.dp, FactoryCardBorder)
+                    border = if (operationMode == "AUTO") null else androidx.compose.foundation.BorderStroke(1.dp, FactoryCardBorder),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
                 ) {
-                    Icon(Icons.Outlined.SmartToy, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("أوتو (AUTO)", fontWeight = FontWeight.Bold)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(Icons.Outlined.SmartToy, contentDescription = null, modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column(horizontalAlignment = Alignment.Start) {
+                            Text("أوتو", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            Text("AUTO", fontSize = 10.sp, fontWeight = FontWeight.Medium)
+                        }
+                    }
                 }
 
                 Button(
                     onClick = { operationMode = "MANUAL" },
-                    modifier = Modifier.weight(1f).height(46.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(58.dp),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (operationMode == "MANUAL") FactoryOrange else FactorySurfaceVariant,
                         contentColor = if (operationMode == "MANUAL") Color.White else FactoryTextSecondary
                     ),
-                    border = if (operationMode == "MANUAL") null else androidx.compose.foundation.BorderStroke(1.dp, FactoryCardBorder)
+                    border = if (operationMode == "MANUAL") null else androidx.compose.foundation.BorderStroke(1.dp, FactoryCardBorder),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
                 ) {
-                    Icon(Icons.Outlined.PanTool, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("يدوي (MANUAL)", fontWeight = FontWeight.Bold)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(Icons.Outlined.PanTool, contentDescription = null, modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column(horizontalAlignment = Alignment.Start) {
+                            Text("يدوي", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            Text("MANUAL", fontSize = 10.sp, fontWeight = FontWeight.Medium)
+                        }
+                    }
                 }
             }
 
