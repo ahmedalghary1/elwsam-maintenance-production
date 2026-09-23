@@ -45,6 +45,10 @@ class ProductionHomeViewModel @Inject constructor(
 
     init {
         observeDatabase()
+        viewModelScope.launch {
+            val report = repository.getOrCreateShiftReport(_uiState.value.currentDate, _uiState.value.selectedShift)
+            _uiState.update { it.copy(currentReportId = report.clientReportId) }
+        }
         loadData()
     }
 
@@ -145,9 +149,19 @@ class ProductionHomeViewModel @Inject constructor(
 
     fun saveMachineEntry(entry: MachineEntryEntity) {
         viewModelScope.launch {
-            repository.saveMachineEntry(entry)
+            val validReportId = if (entry.clientReportId.isNotBlank()) {
+                entry.clientReportId
+            } else if (_uiState.value.currentReportId.isNotBlank()) {
+                _uiState.value.currentReportId
+            } else {
+                val rep = repository.getOrCreateShiftReport(_uiState.value.currentDate, _uiState.value.selectedShift)
+                _uiState.update { it.copy(currentReportId = rep.clientReportId) }
+                rep.clientReportId
+            }
+            val finalEntry = if (entry.clientReportId != validReportId) entry.copy(clientReportId = validReportId) else entry
+            repository.saveMachineEntry(finalEntry)
             closeMachineEntry()
-            _uiState.update { it.copy(message = "تم تسجيل بيانات ماكينة ${entry.assetCode} بنجاح") }
+            _uiState.update { it.copy(message = "تم تسجيل بيانات ماكينة ${finalEntry.assetCode} بنجاح") }
         }
     }
 

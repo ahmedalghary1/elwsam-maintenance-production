@@ -404,7 +404,7 @@ fun ProductionHomeScreen(
     // Machine Entry Sheet
     uiState.selectedAssetForEntry?.let { asset ->
         val existingEntry = uiState.entries[asset.id]
-        key(asset.id) {
+        key(asset.id, uiState.currentReportId) {
             MachineEntrySheet(
                 asset = asset,
                 currentReportId = uiState.currentReportId,

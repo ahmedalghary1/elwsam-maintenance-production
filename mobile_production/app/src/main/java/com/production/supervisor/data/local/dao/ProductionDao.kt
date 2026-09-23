@@ -58,6 +58,12 @@ interface ProductionDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertShiftReport(report: ShiftReportEntity)
 
+    @Update
+    suspend fun updateShiftReport(report: ShiftReportEntity)
+
+    @Query("UPDATE shift_reports SET status = :status, generalNotes = :notes, completedAtDevice = :completedAt, isSynced = 0 WHERE clientReportId = :reportId")
+    suspend fun markReportFinished(reportId: String, status: String, notes: String, completedAt: String)
+
     @Query("UPDATE shift_reports SET isSynced = :synced, status = :status WHERE clientReportId = :reportId")
     suspend fun updateReportSyncStatus(reportId: String, synced: Boolean, status: String)
 

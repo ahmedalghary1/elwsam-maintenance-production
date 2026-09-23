@@ -25,15 +25,10 @@ data class ShiftReportEntity(
 
 @Entity(
     tableName = "machine_entries",
-    foreignKeys = [
-        ForeignKey(
-            entity = ShiftReportEntity::class,
-            parentColumns = ["clientReportId"],
-            childColumns = ["clientReportId"],
-            onDelete = ForeignKey.CASCADE
-        )
-    ],
-    indices = [Index(value = ["clientReportId", "assetId"], unique = true)]
+    indices = [
+        Index(value = ["clientReportId", "assetId"], unique = true),
+        Index(value = ["clientReportId"])
+    ]
 )
 data class MachineEntryEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -64,14 +59,6 @@ data class MachineEntryEntity(
 
 @Entity(
     tableName = "stoppages",
-    foreignKeys = [
-        ForeignKey(
-            entity = ShiftReportEntity::class,
-            parentColumns = ["clientReportId"],
-            childColumns = ["clientReportId"],
-            onDelete = ForeignKey.CASCADE
-        )
-    ],
     indices = [Index(value = ["clientReportId"])]
 )
 data class StoppageEntity(

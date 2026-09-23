@@ -14,7 +14,7 @@ import com.production.supervisor.data.local.entity.*
         MachineEntryEntity::class,
         StoppageEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class ProductionDatabase : RoomDatabase() {

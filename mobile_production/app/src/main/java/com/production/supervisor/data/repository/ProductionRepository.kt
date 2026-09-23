@@ -154,22 +154,26 @@ class ProductionRepository @Inject constructor(
         return try {
             val existing = dao.getShiftReport(clientReportId)
             val nowTime = "${LocalDate.now()}T${LocalTime.now()}"
-            val reportToSave = existing?.copy(
-                completedAtDevice = nowTime,
-                status = "PENDING_HANDOVER",
-                generalNotes = notes,
-                isSynced = false
-            ) ?: ShiftReportEntity(
-                clientReportId = clientReportId,
-                shift = "FIRST",
-                reportDate = LocalDate.now().toString(),
-                startedAtDevice = nowTime,
-                completedAtDevice = nowTime,
-                status = "PENDING_HANDOVER",
-                generalNotes = notes,
-                isSynced = false
-            )
-            dao.upsertShiftReport(reportToSave)
+            if (existing != null) {
+                dao.markReportFinished(
+                    reportId = clientReportId,
+                    status = "PENDING_HANDOVER",
+                    notes = notes,
+                    completedAt = nowTime
+                )
+            } else {
+                val reportToSave = ShiftReportEntity(
+                    clientReportId = clientReportId,
+                    shift = "FIRST",
+                    reportDate = LocalDate.now().toString(),
+                    startedAtDevice = nowTime,
+                    completedAtDevice = nowTime,
+                    status = "PENDING_HANDOVER",
+                    generalNotes = notes,
+                    isSynced = false
+                )
+                dao.upsertShiftReport(reportToSave)
+            }
             syncReportNow(clientReportId)
             Result.success(Unit)
         } catch (e: Exception) {
@@ -193,14 +197,18 @@ class ProductionRepository @Inject constructor(
 
     suspend fun syncReportNow(clientReportId: String): Result<Unit> {
         return try {
+            val report = dao.getShiftReport(clientReportId)
             val entries = dao.getEntriesForReport(clientReportId)
             val stoppages = dao.getStoppagesForReport(clientReportId)
 
             val inputDto = SyncShiftReportInputDto(
                 clientReportId = clientReportId,
-                shift = "FIRST",
-                reportDate = LocalDate.now().toString(),
-                status = "PENDING_HANDOVER",
+                shift = report?.shift ?: "FIRST",
+                reportDate = report?.reportDate ?: LocalDate.now().toString(),
+                startedAtDevice = report?.startedAtDevice,
+                completedAtDevice = report?.completedAtDevice,
+                status = report?.status ?: "PENDING_HANDOVER",
+                generalNotes = report?.generalNotes ?: "",
                 entries = entries.map {
                     MachineEntryInputDto(
                         assetId = it.assetId,
