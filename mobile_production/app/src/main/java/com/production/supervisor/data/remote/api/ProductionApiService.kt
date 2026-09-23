@@ -5,11 +5,12 @@ import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
+import retrofit2.http.Query
 
 interface ProductionApiService {
 
     @GET("api/v1/production/bootstrap/")
-    suspend fun getBootstrap(): Response<ProductionBootstrapDto>
+    suspend fun getBootstrap(@Query("factory") factoryId: String? = null): Response<ProductionBootstrapDto>
 
     @POST("api/v1/production/sync/shift-reports/")
     suspend fun syncShiftReport(@Body body: SyncShiftReportInputDto): Response<ShiftReportDto>

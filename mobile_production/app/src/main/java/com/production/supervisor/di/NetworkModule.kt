@@ -34,7 +34,10 @@ object NetworkModule {
 
     @Provides
     @Singleton
-    fun provideOkHttpClient(tokenManager: TokenManager): OkHttpClient {
+    fun provideOkHttpClient(
+        tokenManager: TokenManager,
+        tokenAuthenticator: com.production.supervisor.data.remote.TokenAuthenticator
+    ): OkHttpClient {
         val logging = HttpLoggingInterceptor().apply {
             level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BODY else HttpLoggingInterceptor.Level.NONE
         }
@@ -52,6 +55,7 @@ object NetworkModule {
 
         return OkHttpClient.Builder()
             .addInterceptor(authInterceptor)
+            .authenticator(tokenAuthenticator)
             .addInterceptor(logging)
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)

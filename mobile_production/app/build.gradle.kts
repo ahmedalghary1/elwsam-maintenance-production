@@ -24,13 +24,13 @@ android {
     buildTypes {
         debug {
             buildConfigField("String", "API_BASE_URL", "\"https://elwsam.pythonanywhere.com/\"")
-            manifestPlaceholders["usesCleartextTraffic"] = "false"
+            manifestPlaceholders["usesCleartextTraffic"] = "true"
         }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             buildConfigField("String", "API_BASE_URL", "\"https://elwsam.pythonanywhere.com/\"")
-            manifestPlaceholders["usesCleartextTraffic"] = "false"
+            manifestPlaceholders["usesCleartextTraffic"] = "true"
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.getByName("debug")
         }

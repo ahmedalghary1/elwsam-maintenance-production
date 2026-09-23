@@ -42,6 +42,7 @@ fun ProductionHomeScreen(
 
     var showFinishShiftDialog by remember { mutableStateOf(false) }
     var finishShiftNotes by remember { mutableStateOf("") }
+    var showFactoryDropdown by remember { mutableStateOf(false) }
 
     LaunchedEffect(uiState.message) {
         uiState.message?.let {
@@ -55,15 +56,78 @@ fun ProductionHomeScreen(
             TopAppBar(
                 title = {
                     Column {
-                        Text(
-                            text = "نظام الإنتاج والأعطال",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 18.sp,
-                            color = Color.White
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "نظام الإنتاج والأعطال",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 17.sp,
+                                color = Color.White
+                            )
+                            if (uiState.factoryName.isNotBlank()) {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Surface(
+                                    color = Color.White.copy(alpha = 0.2f),
+                                    shape = RoundedCornerShape(6.dp),
+                                    modifier = Modifier.clickable(enabled = uiState.availableFactories.size > 1) {
+                                        showFactoryDropdown = true
+                                    }
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = uiState.factoryName,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White
+                                        )
+                                        if (uiState.availableFactories.size > 1) {
+                                            Spacer(modifier = Modifier.width(2.dp))
+                                            Icon(
+                                                Icons.Default.ArrowDropDown,
+                                                contentDescription = "تبديل المصنع",
+                                                tint = Color.White,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                                DropdownMenu(
+                                    expanded = showFactoryDropdown,
+                                    onDismissRequest = { showFactoryDropdown = false }
+                                ) {
+                                    uiState.availableFactories.forEach { factory ->
+                                        val isSelected = factory.id == uiState.selectedFactoryId
+                                        DropdownMenuItem(
+                                            text = {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Text(
+                                                        text = "${factory.name} (${factory.code})",
+                                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                        color = if (isSelected) FactoryOrange else FactoryDark
+                                                    )
+                                                    if (isSelected) {
+                                                        Icon(Icons.Default.Check, contentDescription = null, tint = FactoryOrange, modifier = Modifier.size(16.dp))
+                                                    }
+                                                }
+                                            },
+                                            onClick = {
+                                                showFactoryDropdown = false
+                                                viewModel.selectFactory(factory)
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
                         Text(
                             text = uiState.currentDate,
-                            fontSize = 12.sp,
+                            fontSize = 11.sp,
                             color = Color(0xFFCBD5E1)
                         )
                     }
@@ -511,9 +575,30 @@ fun MachineCard(
                 }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
-            // Row 2: Details
+            // Row 2: Machine Specifications from Dashboard
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                SpecBadge(label = "اللقم", value = "${asset.originalCavities}")
+                if (asset.coolingTimeSeconds > 0) {
+                    SpecBadge(label = "تبريد", value = "${asset.coolingTimeSeconds}ث")
+                }
+                if (asset.cycleTimeSeconds > 0) {
+                    SpecBadge(label = "دورة", value = "${asset.cycleTimeSeconds}ث")
+                }
+                if (asset.targetCycleProduction > 0) {
+                    SpecBadge(label = "مستهدف", value = "${asset.targetCycleProduction.toInt()} كجم")
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Row 3: Details
             if (entry != null) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -609,18 +694,30 @@ fun MachineCard(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
-                        Text(
-                            text = "المنتج المعتاد: ${asset.defaultProductName ?: "غير محدد"}",
-                            fontSize = 12.sp,
-                            color = FactoryTextMuted
-                        )
-                        if (!asset.defaultOperatorName.isNullOrBlank()) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.Inventory2, contentDescription = null, modifier = Modifier.size(13.dp), tint = FactoryNavy)
+                            Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = "العامل المعتاد: ${asset.defaultOperatorName}",
-                                fontSize = 11.sp,
-                                color = FactoryTextMuted
+                                text = "المنتج المعتاد: ${asset.defaultProductName ?: "غير محدد"}",
+                                fontSize = 12.sp,
+                                fontWeight = if (asset.defaultProductName != null) FontWeight.Bold else FontWeight.Normal,
+                                color = if (asset.defaultProductName != null) FactoryDark else FactoryTextMuted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
+                        }
+                        if (!asset.defaultOperatorName.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Outlined.Person, contentDescription = null, modifier = Modifier.size(13.dp), tint = FactoryTextMuted)
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "العامل المعتاد: ${asset.defaultOperatorName}",
+                                    fontSize = 11.sp,
+                                    color = FactoryTextSecondary
+                                )
+                            }
                         }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -643,3 +740,31 @@ fun MachineCard(
         }
     }
 }
+
+@Composable
+private fun SpecBadge(label: String, value: String) {
+    Surface(
+        color = Color(0xFFF1F5F9),
+        shape = RoundedCornerShape(6.dp),
+        border = androidx.compose.foundation.BorderStroke(0.5.dp, Color(0xFFCBD5E1))
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "$label: ",
+                fontSize = 10.sp,
+                color = FactoryTextMuted,
+                fontWeight = FontWeight.Medium
+            )
+            Text(
+                text = value,
+                fontSize = 10.sp,
+                color = FactoryNavy,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+

@@ -143,6 +143,71 @@ fun MachineEntrySheet(
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
 
+            // Dashboard Machine Specifications Card
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 14.dp),
+                colors = CardDefaults.cardColors(containerColor = FactorySurfaceVariant),
+                shape = RoundedCornerShape(12.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, FactoryCardBorder)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "إعدادات الماكينة المعتمدة بالداشبورد",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            color = FactoryNavy
+                        )
+                        Surface(
+                            color = FactoryNavy.copy(alpha = 0.1f),
+                            shape = RoundedCornerShape(4.dp)
+                        ) {
+                            Text(
+                                text = asset.assetCode,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp,
+                                color = FactoryNavy,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Text("اللقم الأصلي", fontSize = 10.sp, color = FactoryTextMuted)
+                            Text("${asset.originalCavities}", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = FactoryDark)
+                        }
+                        if (asset.coolingTimeSeconds > 0) {
+                            Column {
+                                Text("وقت التبريد", fontSize = 10.sp, color = FactoryTextMuted)
+                                Text("${asset.coolingTimeSeconds} ث", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = FactoryDark)
+                            }
+                        }
+                        if (asset.cycleTimeSeconds > 0) {
+                            Column {
+                                Text("وقت الدورة", fontSize = 10.sp, color = FactoryTextMuted)
+                                Text("${asset.cycleTimeSeconds} ث", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = FactoryDark)
+                            }
+                        }
+                        if (asset.targetCycleProduction > 0) {
+                            Column {
+                                Text("المستهدف", fontSize = 10.sp, color = FactoryTextMuted)
+                                Text("${asset.targetCycleProduction.toInt()} كجم", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = FactoryGreenDark)
+                            }
+                        }
+                    }
+                }
+            }
+
             // 1. القائم على الماكينة (العامل)
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -219,15 +284,33 @@ fun MachineEntrySheet(
                         )
                         HorizontalDivider()
                     }
-                    operators.filter { it.name != originalOperatorDisplayName }.forEach { op ->
+                    if (operators.isEmpty() && originalOperatorDisplayName.isBlank()) {
                         DropdownMenuItem(
-                            text = { Text(op.name, fontWeight = FontWeight.Medium) },
-                            onClick = {
-                                selectedOperator = op
-                                operatorNameText = op.name
-                                showOperatorDropdown = false
-                            }
+                            text = { Text("لا يوجد عمال مسجلين في هذا المصنع", color = FactoryTextMuted) },
+                            onClick = { showOperatorDropdown = false }
                         )
+                    } else {
+                        operators.filter { it.name != originalOperatorDisplayName }.forEach { op ->
+                            DropdownMenuItem(
+                                text = {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(op.name, fontWeight = FontWeight.Medium)
+                                        if (op.phone.isNotBlank()) {
+                                            Text(op.phone, fontSize = 11.sp, color = FactoryTextMuted)
+                                        }
+                                    }
+                                },
+                                onClick = {
+                                    selectedOperator = op
+                                    operatorNameText = op.name
+                                    showOperatorDropdown = false
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -334,15 +417,33 @@ fun MachineEntrySheet(
                         )
                         HorizontalDivider()
                     }
-                    products.filter { it.name != originalProductDisplayName }.forEach { prod ->
+                    if (products.isEmpty() && originalProductDisplayName.isBlank()) {
                         DropdownMenuItem(
-                            text = { Text(prod.name, fontWeight = FontWeight.Medium) },
-                            onClick = {
-                                selectedProduct = prod
-                                productNameText = prod.name
-                                showProductDropdown = false
-                            }
+                            text = { Text("لا توجد منتجات مسجلة لهذا المصنع بالداشبورد", color = FactoryTextMuted) },
+                            onClick = { showProductDropdown = false }
                         )
+                    } else {
+                        products.filter { it.name != originalProductDisplayName }.forEach { prod ->
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text(prod.name, fontWeight = FontWeight.Medium, color = FactoryDark)
+                                        val details = buildList {
+                                            if (prod.code.isNotBlank()) add("كود: ${prod.code}")
+                                            if (prod.weightPerPieceGrams > 0) add("وزن القطعة: ${prod.weightPerPieceGrams} جم")
+                                        }.joinToString(" | ")
+                                        if (details.isNotBlank()) {
+                                            Text(details, fontSize = 11.sp, color = FactoryTextMuted)
+                                        }
+                                    }
+                                },
+                                onClick = {
+                                    selectedProduct = prod
+                                    productNameText = prod.name
+                                    showProductDropdown = false
+                                }
+                            )
+                        }
                     }
                 }
             }

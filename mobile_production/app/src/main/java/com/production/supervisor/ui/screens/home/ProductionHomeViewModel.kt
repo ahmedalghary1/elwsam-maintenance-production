@@ -16,6 +16,10 @@ data class ProductionHomeUiState(
     val selectedShift: String = "FIRST", // FIRST, SECOND, THIRD
     val currentDate: String = LocalDate.now().toString(),
     val currentReportId: String = "",
+    val factoryName: String = "",
+    val factoryCode: String = "",
+    val availableFactories: List<com.production.supervisor.data.remote.dto.FactoryDto> = emptyList(),
+    val selectedFactoryId: Int? = null,
     val assets: List<AssetEntity> = emptyList(),
     val products: List<ProductEntity> = emptyList(),
     val operators: List<OperatorEntity> = emptyList(),
@@ -39,17 +43,68 @@ class ProductionHomeViewModel @Inject constructor(
     val uiState: StateFlow<ProductionHomeUiState> = _uiState.asStateFlow()
 
     init {
+        observeDatabase()
         loadData()
     }
 
-    fun loadData() {
+    private fun observeDatabase() {
+        viewModelScope.launch {
+            repository.getAssetsFlow().collect { assetList ->
+                _uiState.update { it.copy(assets = assetList) }
+            }
+        }
+        viewModelScope.launch {
+            repository.getProductsFlow().collect { prodList ->
+                _uiState.update { it.copy(products = prodList) }
+            }
+        }
+        viewModelScope.launch {
+            repository.getOperatorsFlow().collect { opList ->
+                _uiState.update { it.copy(operators = opList) }
+            }
+        }
+        viewModelScope.launch {
+            _uiState.map { it.currentReportId }
+                .distinctUntilChanged()
+                .filter { it.isNotBlank() }
+                .flatMapLatest { reportId -> repository.getEntriesFlow(reportId) }
+                .collect { entryList ->
+                    val map = entryList.associateBy { it.assetId }
+                    _uiState.update { it.copy(entries = map) }
+                }
+        }
+        viewModelScope.launch {
+            _uiState.map { it.currentReportId }
+                .distinctUntilChanged()
+                .filter { it.isNotBlank() }
+                .flatMapLatest { reportId -> repository.getStoppagesFlow(reportId) }
+                .collect { stopList ->
+                    _uiState.update { it.copy(stoppages = stopList) }
+                }
+        }
+    }
+
+    fun loadData(factoryId: String? = null) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
 
-            // 1. Fetch bootstrap and pending handover
-            val handoverResult = repository.refreshBootstrap()
-            handoverResult.onSuccess { pending ->
-                _uiState.update { it.copy(pendingHandover = pending) }
+            // 1. Fetch bootstrap from backend
+            val bootstrapResult = repository.refreshBootstrap(factoryId)
+            bootstrapResult.onSuccess { bootstrap ->
+                _uiState.update {
+                    it.copy(
+                        pendingHandover = bootstrap.pendingHandover,
+                        factoryName = bootstrap.factory.name,
+                        factoryCode = bootstrap.factory.code,
+                        selectedFactoryId = bootstrap.factory.id,
+                        availableFactories = bootstrap.factories.ifEmpty { listOf(bootstrap.factory) },
+                        message = if (factoryId != null) "تم تحميل بيانات ${bootstrap.factory.name}" else null
+                    )
+                }
+            }.onFailure { ex ->
+                _uiState.update {
+                    it.copy(message = ex.message ?: "تعذر الاتصال بالسيرفر، يتم عرض البيانات المحلية")
+                }
             }
 
             // 2. Setup current report
@@ -57,43 +112,11 @@ class ProductionHomeViewModel @Inject constructor(
             val shift = _uiState.value.selectedShift
             val report = repository.getOrCreateShiftReport(date, shift)
             _uiState.update { it.copy(currentReportId = report.clientReportId, isLoading = false) }
-
-            // 3. Collect assets, products, operators, entries, stoppages
-            launch {
-                repository.getAssetsFlow().collect { assetList ->
-                    _uiState.update { it.copy(assets = assetList) }
-                }
-            }
-            launch {
-                repository.getProductsFlow().collect { prodList ->
-                    _uiState.update { it.copy(products = prodList) }
-                }
-            }
-            launch {
-                repository.getOperatorsFlow().collect { opList ->
-                    _uiState.update { it.copy(operators = opList) }
-                }
-            }
-            launch {
-                _uiState.map { it.currentReportId }
-                    .distinctUntilChanged()
-                    .filter { it.isNotBlank() }
-                    .flatMapLatest { reportId -> repository.getEntriesFlow(reportId) }
-                    .collect { entryList ->
-                        val map = entryList.associateBy { it.assetId }
-                        _uiState.update { it.copy(entries = map) }
-                    }
-            }
-            launch {
-                _uiState.map { it.currentReportId }
-                    .distinctUntilChanged()
-                    .filter { it.isNotBlank() }
-                    .flatMapLatest { reportId -> repository.getStoppagesFlow(reportId) }
-                    .collect { stopList ->
-                        _uiState.update { it.copy(stoppages = stopList) }
-                    }
-            }
         }
+    }
+
+    fun selectFactory(factory: com.production.supervisor.data.remote.dto.FactoryDto) {
+        loadData(factory.id.toString())
     }
 
     fun setShift(shift: String) {

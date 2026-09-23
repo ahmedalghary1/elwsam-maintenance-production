@@ -14,7 +14,8 @@ import javax.inject.Singleton
 @Singleton
 class ProductionRepository @Inject constructor(
     private val api: ProductionApiService,
-    private val dao: ProductionDao
+    private val dao: ProductionDao,
+    private val tokenManager: com.production.supervisor.data.local.datastore.TokenManager
 ) {
 
     fun getAssetsFlow(): Flow<List<AssetEntity>> = dao.getAssetsFlow()
@@ -24,14 +25,29 @@ class ProductionRepository @Inject constructor(
     fun getStoppagesFlow(reportId: String): Flow<List<StoppageEntity>> = dao.getStoppagesForReportFlow(reportId)
     fun getShiftReportFlow(reportId: String): Flow<ShiftReportEntity?> = dao.getShiftReportFlow(reportId)
 
-    suspend fun refreshBootstrap(): Result<ShiftReportDto?> {
+    suspend fun refreshBootstrap(factoryId: String? = null): Result<ProductionBootstrapDto> {
         return try {
-            val response = api.getBootstrap()
+            val targetFactoryId = factoryId ?: tokenManager.getSelectedFactoryId()
+            val response = api.getBootstrap(targetFactoryId)
             if (response.isSuccessful && response.body() != null) {
                 val data = response.body()!!
 
-                // Map and insert Assets
+                // Save selected factory
+                tokenManager.saveSelectedFactory(data.factory.id.toString(), data.factory.name)
+
+                // Build lookup maps for safe resolution
+                val productMap = data.products.associateBy { it.id }
+                val operatorMap = data.operators.associateBy { it.id }
+
+                // Map and insert Assets with fallback resolution
                 val assetEntities = data.assets.map { dto ->
+                    val defaultProdId = dto.productionDefault?.defaultProduct
+                    val resolvedProdName = dto.productionDefault?.defaultProductName?.takeIf { it.isNotBlank() }
+                        ?: defaultProdId?.let { productMap[it]?.name }
+                    val defaultOpId = dto.productionDefault?.defaultOperator
+                    val resolvedOpName = dto.productionDefault?.defaultOperatorName?.takeIf { it.isNotBlank() }
+                        ?: defaultOpId?.let { operatorMap[it]?.name }
+
                     AssetEntity(
                         id = dto.id,
                         assetCode = dto.assetCode,
@@ -39,10 +55,10 @@ class ProductionRepository @Inject constructor(
                         assetTypeDisplay = dto.assetTypeDisplay,
                         maintenanceTitle = dto.productionTitle ?: dto.maintenanceTitle,
                         sequenceOrder = dto.sequenceOrder,
-                        defaultProductId = dto.productionDefault?.defaultProduct,
-                        defaultProductName = dto.productionDefault?.defaultProductName,
-                        defaultOperatorId = dto.productionDefault?.defaultOperator,
-                        defaultOperatorName = dto.productionDefault?.defaultOperatorName,
+                        defaultProductId = defaultProdId,
+                        defaultProductName = resolvedProdName,
+                        defaultOperatorId = defaultOpId,
+                        defaultOperatorName = resolvedOpName,
                         originalCavities = dto.productionDefault?.originalCavities ?: 1,
                         coolingTimeSeconds = dto.productionDefault?.coolingTimeSeconds ?: 0.0,
                         cycleTimeSeconds = dto.productionDefault?.cycleTimeSeconds ?: 0.0,
@@ -78,9 +94,11 @@ class ProductionRepository @Inject constructor(
                 dao.deleteAllOperators()
                 dao.insertOperators(operatorEntities)
 
-                Result.success(data.pendingHandover)
+                Result.success(data)
             } else {
-                Result.failure(Exception("فشل في تحميل البيانات الأساسية من السيرفر"))
+                val errorMsg = response.errorBody()?.string()?.takeIf { it.isNotBlank() }
+                    ?: "فشل في تحميل البيانات الأساسية (${response.code()})"
+                Result.failure(Exception(errorMsg))
             }
         } catch (e: Exception) {
             Result.failure(e)

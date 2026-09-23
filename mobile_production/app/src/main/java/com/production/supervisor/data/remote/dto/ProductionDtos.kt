@@ -8,12 +8,24 @@ data class ProductionBootstrapDto(
     @SerialName("server_date") val serverDate: String,
     val timezone: String,
     val factory: FactoryDto,
+    val factories: List<FactoryDto> = emptyList(),
     val user: UserDto,
     val assets: List<ProductionAssetDto>,
     val products: List<ProductDto>,
     val operators: List<MachineOperatorDto>,
     @SerialName("pending_handover") val pendingHandover: ShiftReportDto? = null,
     @SerialName("today_reports") val todayReports: List<ShiftReportDto> = emptyList()
+)
+
+@Serializable
+data class RefreshTokenRequestDto(
+    val refresh: String
+)
+
+@Serializable
+data class RefreshTokenResponseDto(
+    val access: String,
+    val refresh: String? = null
 )
 
 @Serializable
