@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %}تعديل إعدادات ماكينة {{ asset.code }} | إدارة الإنتاج{% endblock %}
+{% block title %}تعديل إعدادات ماكينة {{ asset.asset_code }} | إدارة الإنتاج{% endblock %}
 
 {% block content %}
 <div class="page-title">
   <div>
-    <h1>تعديل إعدادات الماكينة: {{ asset.code }} - {{ asset.name }}</h1>
+    <h1>تعديل إعدادات الماكينة: {{ asset.asset_code }}</h1>
     <p>هذه القيم تظهر لمشرف الوردية في تطبيق الموبايل كقيم ثابتة (مقفولة بـ Lock) ولا يمكن تعديلها إلا من لوحة التحكم.</p>
   </div>
   <div>

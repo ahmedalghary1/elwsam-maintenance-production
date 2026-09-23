@@ -246,17 +246,28 @@ def machine_defaults(request):
         messages.error(request, "المستخدم غير مربوط بمصنع.")
         return redirect("dashboard:home")
 
-    target_factory = factory or (factories[0] if factories else None)
-    if target_factory:
+    if factory:
         assets = Asset.objects.filter(
-            factory=target_factory, is_active=True, is_archived=False
-        ).select_related("production_default", "production_default__default_product", "production_default__default_operator", "factory").order_by("sequence_order", "id")
+            factory=factory, is_archived=False
+        ).select_related(
+            "production_default",
+            "production_default__default_product",
+            "production_default__default_operator",
+            "factory",
+        ).order_by("sequence_order", "id")
     else:
-        assets = Asset.objects.none()
+        assets = Asset.objects.filter(
+            is_archived=False
+        ).select_related(
+            "production_default",
+            "production_default__default_product",
+            "production_default__default_operator",
+            "factory",
+        ).order_by("factory__id", "sequence_order", "id")
 
     context = {
         "assets": assets,
-        "factory": target_factory,
+        "factory": factory,
         "factories": factories,
         "is_admin": is_admin,
     }
@@ -277,7 +288,7 @@ def machine_default_edit(request, asset_id):
         form = MachineProductionDefaultForm(request.POST, instance=default_obj, factory=asset.factory)
         if form.is_valid():
             form.save()
-            messages.success(request, f"تم تحديث إعدادات الإنتاج لماكينة {asset.code} - {asset.name} بنجاح.")
+            messages.success(request, f"تم تحديث إعدادات الإنتاج لماكينة {asset.asset_code} بنجاح.")
             return redirect("production:machine_defaults")
     else:
         form = MachineProductionDefaultForm(instance=default_obj, factory=asset.factory)

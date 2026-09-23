@@ -316,4 +316,38 @@ class ProductionAPITestCase(TestCase):
         self.assertIn("تغيير منتج", home_content)
         self.assertIn("تغيير عامل", home_content)
 
+    def test_machine_defaults_view_and_edit_use_asset_code(self):
+        from django.test import Client
+        client = Client()
+        client.force_login(self.supervisor1)
+
+        # 1. Machine defaults list renders asset_code and does not have machine name column
+        res = client.get(reverse("production:machine_defaults"))
+        self.assertEqual(res.status_code, 200)
+        content = res.content.decode("utf-8")
+        self.assertIn("M-01", content)
+        self.assertNotIn("اسم الماكينة", content)
+
+        # 2. Machine default edit page renders asset_code
+        edit_url = reverse("production:machine_default_edit", args=[self.asset1.id])
+        edit_res = client.get(edit_url)
+        self.assertEqual(edit_res.status_code, 200)
+        edit_content = edit_res.content.decode("utf-8")
+        self.assertIn("M-01", edit_content)
+
+        # 3. Post edit form and check redirect and success message with asset_code
+        post_res = client.post(edit_url, {
+            "default_product": self.prod_default.id,
+            "default_operator": self.operator.id,
+            "original_cavities": 4,
+            "cooling_time_seconds": 12.5,
+            "cycle_time_seconds": 25.0,
+            "target_cycle_production": 400.0,
+        }, follow=True)
+        self.assertEqual(post_res.status_code, 200)
+        post_content = post_res.content.decode("utf-8")
+        self.assertIn("تم تحديث إعدادات الإنتاج لماكينة M-01 بنجاح.", post_content)
+        self.assertIn("M-01", post_content)
+
+
 
