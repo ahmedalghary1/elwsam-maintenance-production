@@ -46,6 +46,9 @@ interface ProductionDao {
     @Query("SELECT * FROM shift_reports WHERE clientReportId = :reportId")
     fun getShiftReportFlow(reportId: String): Flow<ShiftReportEntity?>
 
+    @Query("SELECT * FROM shift_reports WHERE clientReportId = :reportId LIMIT 1")
+    suspend fun getShiftReport(reportId: String): ShiftReportEntity?
+
     @Query("SELECT * FROM shift_reports WHERE reportDate = :date AND shift = :shift LIMIT 1")
     suspend fun findShiftReport(date: String, shift: String): ShiftReportEntity?
 

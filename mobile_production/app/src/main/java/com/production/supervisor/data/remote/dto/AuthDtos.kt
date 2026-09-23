@@ -17,9 +17,21 @@ data class LoginResponseDto(
 )
 
 @Serializable
+data class NextSupervisorDto(
+    val id: Int,
+    val name: String,
+    val phone: String = ""
+)
+
+@Serializable
 data class UserDto(
     val id: Int,
     val phone: String,
     val name: String = "",
-    val role: String = ""
+    val role: String = "",
+    val shift: String? = null,
+    @SerialName("shift_display") val shiftDisplay: String? = null,
+    @SerialName("next_shift") val nextShift: String? = null,
+    @SerialName("next_shift_display") val nextShiftDisplay: String? = null,
+    @SerialName("next_shift_supervisor") val nextShiftSupervisor: NextSupervisorDto? = null
 )

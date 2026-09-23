@@ -152,20 +152,24 @@ class ProductionRepository @Inject constructor(
 
     suspend fun finishShift(clientReportId: String, notes: String): Result<Unit> {
         return try {
-            val report = dao.getShiftReportFlow(clientReportId)
+            val existing = dao.getShiftReport(clientReportId)
             val nowTime = "${LocalDate.now()}T${LocalTime.now()}"
-            dao.upsertShiftReport(
-                ShiftReportEntity(
-                    clientReportId = clientReportId,
-                    shift = "FIRST", // updated below from DB
-                    reportDate = LocalDate.now().toString(),
-                    startedAtDevice = nowTime,
-                    completedAtDevice = nowTime,
-                    status = "PENDING_HANDOVER",
-                    generalNotes = notes,
-                    isSynced = false
-                )
+            val reportToSave = existing?.copy(
+                completedAtDevice = nowTime,
+                status = "PENDING_HANDOVER",
+                generalNotes = notes,
+                isSynced = false
+            ) ?: ShiftReportEntity(
+                clientReportId = clientReportId,
+                shift = "FIRST",
+                reportDate = LocalDate.now().toString(),
+                startedAtDevice = nowTime,
+                completedAtDevice = nowTime,
+                status = "PENDING_HANDOVER",
+                generalNotes = notes,
+                isSynced = false
             )
+            dao.upsertShiftReport(reportToSave)
             syncReportNow(clientReportId)
             Result.success(Unit)
         } catch (e: Exception) {

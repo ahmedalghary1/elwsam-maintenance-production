@@ -20,6 +20,7 @@ data class ProductionHomeUiState(
     val factoryCode: String = "",
     val availableFactories: List<com.production.supervisor.data.remote.dto.FactoryDto> = emptyList(),
     val selectedFactoryId: Int? = null,
+    val currentUser: com.production.supervisor.data.remote.dto.UserDto? = null,
     val assets: List<AssetEntity> = emptyList(),
     val products: List<ProductEntity> = emptyList(),
     val operators: List<OperatorEntity> = emptyList(),
@@ -90,9 +91,17 @@ class ProductionHomeViewModel @Inject constructor(
 
             // 1. Fetch bootstrap from backend
             val bootstrapResult = repository.refreshBootstrap(factoryId)
+            var currentShift = _uiState.value.selectedShift
+
             bootstrapResult.onSuccess { bootstrap ->
+                val assignedShift = bootstrap.user.shift
+                if (!assignedShift.isNullOrBlank() && factoryId == null) {
+                    currentShift = assignedShift
+                }
                 _uiState.update {
                     it.copy(
+                        currentUser = bootstrap.user,
+                        selectedShift = currentShift,
                         pendingHandover = bootstrap.pendingHandover,
                         factoryName = bootstrap.factory.name,
                         factoryCode = bootstrap.factory.code,
@@ -109,8 +118,7 @@ class ProductionHomeViewModel @Inject constructor(
 
             // 2. Setup current report
             val date = _uiState.value.currentDate
-            val shift = _uiState.value.selectedShift
-            val report = repository.getOrCreateShiftReport(date, shift)
+            val report = repository.getOrCreateShiftReport(date, currentShift)
             _uiState.update { it.copy(currentReportId = report.clientReportId, isLoading = false) }
         }
     }

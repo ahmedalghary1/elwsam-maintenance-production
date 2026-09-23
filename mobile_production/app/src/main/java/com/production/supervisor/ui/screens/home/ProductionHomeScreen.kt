@@ -276,6 +276,7 @@ fun ProductionHomeScreen(
                             )
                             shifts.forEach { (shiftKey, shiftName) ->
                                 val isSelected = uiState.selectedShift == shiftKey
+                                val isAssigned = uiState.currentUser?.shift == shiftKey
                                 Box(
                                     modifier = Modifier
                                         .weight(1f)
@@ -284,20 +285,35 @@ fun ProductionHomeScreen(
                                             RoundedCornerShape(10.dp)
                                         )
                                         .border(
-                                            1.dp,
-                                            if (isSelected) FactoryNavy else FactoryCardBorder,
+                                            if (isAssigned && !isSelected) 1.5.dp else 1.dp,
+                                            when {
+                                                isSelected -> FactoryNavy
+                                                isAssigned -> FactoryOrange
+                                                else -> FactoryCardBorder
+                                            },
                                             RoundedCornerShape(10.dp)
                                         )
                                         .clickable { viewModel.setShift(shiftKey) }
-                                        .padding(vertical = 11.dp),
+                                        .padding(vertical = 9.dp, horizontal = 2.dp),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Text(
-                                        text = shiftName,
-                                        fontSize = 11.sp,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                        color = if (isSelected) Color.White else FactoryTextPrimary
-                                    )
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text(
+                                            text = shiftName,
+                                            fontSize = 11.sp,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (isSelected) Color.White else FactoryTextPrimary
+                                        )
+                                        if (isAssigned) {
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            Text(
+                                                text = "⭐ ورديتك",
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (isSelected) FactoryLightOrange else FactoryOrangeDark
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -422,16 +438,69 @@ fun ProductionHomeScreen(
 
     // Finish Shift Dialog
     if (showFinishShiftDialog) {
+        val currentShiftName = when (uiState.selectedShift) {
+            "FIRST" -> "الوردية الأولى (صباحية)"
+            "SECOND" -> "الوردية الثانية (مسائية)"
+            "THIRD" -> "الوردية الثالثة (ليلية)"
+            else -> uiState.selectedShift
+        }
+        val nextShiftName = when (uiState.selectedShift) {
+            "FIRST" -> "الوردية الثانية (مسائية)"
+            "SECOND" -> "الوردية الثالثة (ليلية)"
+            "THIRD" -> "الوردية الأولى (صباحية)"
+            else -> "الوردية التالية"
+        }
+        val nextSupervisor = uiState.currentUser?.nextShiftSupervisor
+
         AlertDialog(
             onDismissRequest = { showFinishShiftDialog = false },
-            title = { Text("تسليم الوردية للمشرف التالي", fontWeight = FontWeight.Bold, color = FactoryNavy) },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.Handshake, contentDescription = null, tint = FactoryOrange, modifier = Modifier.size(24.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("تسليم الوردية للمشرف التالي", fontWeight = FontWeight.Bold, color = FactoryNavy, fontSize = 17.sp)
+                }
+            },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("سيتم حفظ كافة البيانات وتجهيز التقرير للمشرف القادم في الوردية التالية ليقوم بتأكيد الاستلام.")
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    // Handover routing card
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = FactoryLightOrange.copy(alpha = 0.5f)),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, FactoryOrange.copy(alpha = 0.4f)),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("الوردية المسلَّمة: ", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = FactoryDark)
+                                Text(currentShiftName, fontSize = 12.sp, color = FactoryTextSecondary)
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("الوردية المستلمة: ", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = FactoryDark)
+                                Text(nextShiftName, fontSize = 12.sp, color = FactoryNavy, fontWeight = FontWeight.SemiBold)
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("المشرف المستلم: ", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = FactoryDark)
+                                if (nextSupervisor != null) {
+                                    Text("${nextSupervisor.name} ${if (nextSupervisor.phone.isNotBlank()) "(${nextSupervisor.phone})" else ""}", fontSize = 12.sp, color = FactoryGreenDark, fontWeight = FontWeight.Bold)
+                                } else {
+                                    Text("سيظهر التقرير تلقائياً لمشرف الوردية القادمة فور دخوله", fontSize = 11.sp, color = FactoryTextSecondary)
+                                }
+                            }
+                        }
+                    }
+
+                    Text(
+                        text = "سيتم إنهاء الوردية الحالية وتحويل التقرير للاستلام ليقوم المشرف القادم بمراجعة الماكينات واعتمادها.",
+                        fontSize = 12.sp,
+                        color = FactoryTextSecondary
+                    )
+
                     OutlinedTextField(
                         value = finishShiftNotes,
                         onValueChange = { finishShiftNotes = it },
-                        label = { Text("ملاحظات عامة للوردية القادمة (اختياري)") },
+                        label = { Text("ملاحظات تسليم الوردية للمشرف القادم (اختياري)") },
+                        leadingIcon = { Icon(Icons.Outlined.EditNote, contentDescription = null, tint = FactoryNavy) },
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(10.dp)
                     )
@@ -788,4 +857,5 @@ private fun SpecBadge(label: String, value: String) {
         }
     }
 }
+
 
