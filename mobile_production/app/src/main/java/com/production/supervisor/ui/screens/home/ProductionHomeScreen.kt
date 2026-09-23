@@ -577,22 +577,43 @@ fun MachineCard(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Row 2: Machine Specifications from Dashboard
+            // Row 2: Machine Specifications (Actual if recorded, otherwise Dashboard default)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(vertical = 2.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                SpecBadge(label = "اللقم", value = "${asset.originalCavities}")
-                if (asset.coolingTimeSeconds > 0) {
-                    SpecBadge(label = "تبريد", value = "${asset.coolingTimeSeconds}ث")
-                }
-                if (asset.cycleTimeSeconds > 0) {
-                    SpecBadge(label = "دورة", value = "${asset.cycleTimeSeconds}ث")
-                }
-                if (asset.targetCycleProduction > 0) {
-                    SpecBadge(label = "مستهدف", value = "${asset.targetCycleProduction.toInt()} كجم")
+                if (entry != null) {
+                    val cavitiesVal = if (entry.currentCavities != asset.originalCavities) {
+                        "${entry.currentCavities}/${asset.originalCavities}"
+                    } else {
+                        "${asset.originalCavities}"
+                    }
+                    SpecBadge(label = "اللقم", value = cavitiesVal)
+                    val cooling = if (entry.coolingTimeSeconds > 0) entry.coolingTimeSeconds else asset.coolingTimeSeconds
+                    if (cooling > 0) {
+                        SpecBadge(label = "تبريد", value = "${cooling}ث")
+                    }
+                    val cycle = if (entry.cycleTimeSeconds > 0) entry.cycleTimeSeconds else asset.cycleTimeSeconds
+                    if (cycle > 0) {
+                        SpecBadge(label = "دورة", value = "${cycle}ث")
+                    }
+                    val target = if (entry.targetCycleProduction > 0) entry.targetCycleProduction else asset.targetCycleProduction
+                    if (target > 0) {
+                        SpecBadge(label = "مستهدف", value = "${target.toInt()} كجم")
+                    }
+                } else {
+                    SpecBadge(label = "اللقم", value = "${asset.originalCavities}")
+                    if (asset.coolingTimeSeconds > 0) {
+                        SpecBadge(label = "تبريد", value = "${asset.coolingTimeSeconds}ث")
+                    }
+                    if (asset.cycleTimeSeconds > 0) {
+                        SpecBadge(label = "دورة", value = "${asset.cycleTimeSeconds}ث")
+                    }
+                    if (asset.targetCycleProduction > 0) {
+                        SpecBadge(label = "مستهدف", value = "${asset.targetCycleProduction.toInt()} كجم")
+                    }
                 }
             }
 
