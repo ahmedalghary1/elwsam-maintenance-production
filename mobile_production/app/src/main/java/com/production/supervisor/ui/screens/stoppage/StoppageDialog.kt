@@ -37,14 +37,22 @@ fun StoppageDialog(
     var showAssetMenu by remember { mutableStateOf(false) }
     var showTypeMenu by remember { mutableStateOf(false) }
 
-    val stoppageTypes = listOf(
-        "MACHINE_BREAKDOWN" to "عطل ميكانيكي / كهربائي بالماكينة",
-        "FRIDAY_PRAYER" to "إيقاف صلاة الجمعة",
-        "POWER_OUTAGE" to "انقطاع التيار الكهربائي",
-        "MOLD_CHANGE" to "تغيير اسطمبة",
-        "MAINTENANCE" to "صيانة دورية / طارئة",
-        "OTHER" to "أخرى"
-    )
+    val isFriday = try {
+        java.time.LocalDate.now().dayOfWeek == java.time.DayOfWeek.FRIDAY
+    } catch (_: Exception) {
+        false
+    }
+
+    val stoppageTypes = buildList {
+        add("MACHINE_BREAKDOWN" to "عطل ميكانيكي / كهربائي بالماكينة")
+        if (isFriday) {
+            add("FRIDAY_PRAYER" to "إيقاف صلاة الجمعة")
+        }
+        add("POWER_OUTAGE" to "انقطاع التيار الكهربائي")
+        add("MOLD_CHANGE" to "تغيير اسطمبة")
+        add("MAINTENANCE" to "صيانة دورية / طارئة")
+        add("OTHER" to "أخرى")
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,

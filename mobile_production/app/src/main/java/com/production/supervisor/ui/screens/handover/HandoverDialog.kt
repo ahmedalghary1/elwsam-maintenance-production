@@ -46,7 +46,7 @@ fun HandoverDialog(
                     color = FactoryDark
                 )
                 Text(
-                    text = "المشرف المسلّم: ${pendingReport.supervisorName}",
+                    text = "الزميل المسلّم: ${pendingReport.supervisorName}",
                     fontSize = 13.sp,
                     color = FactoryTextSecondary
                 )
@@ -59,7 +59,7 @@ fun HandoverDialog(
                         shape = RoundedCornerShape(10.dp)
                     ) {
                         Column(modifier = Modifier.padding(10.dp)) {
-                            Text("ملاحظات المشرف المسلّم:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text("ملاحظات الزميل المسلّم:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                             Text(pendingReport.generalNotes, fontSize = 12.sp, color = FactoryTextPrimary)
                         }
                     }

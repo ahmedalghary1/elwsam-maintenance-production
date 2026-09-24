@@ -29,6 +29,7 @@ import com.production.supervisor.data.local.entity.MachineEntryEntity
 import com.production.supervisor.ui.screens.entry.MachineEntrySheet
 import com.production.supervisor.ui.screens.handover.HandoverDialog
 import com.production.supervisor.ui.screens.stoppage.StoppageDialog
+import com.production.supervisor.ui.screens.wizard.FawryWizardScreen
 import com.production.supervisor.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -42,13 +43,20 @@ fun ProductionHomeScreen(
 
     var showFinishShiftDialog by remember { mutableStateOf(false) }
     var finishShiftNotes by remember { mutableStateOf("") }
-    var showFactoryDropdown by remember { mutableStateOf(false) }
 
     LaunchedEffect(uiState.message) {
         uiState.message?.let {
             snackbarHostState.showSnackbar(it)
             viewModel.clearMessage()
         }
+    }
+
+    if (uiState.isFawryMode) {
+        FawryWizardScreen(
+            viewModel = viewModel,
+            onLogout = onLogout
+        )
+        return
     }
 
     Scaffold(
@@ -67,61 +75,15 @@ fun ProductionHomeScreen(
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Surface(
                                     color = Color.White.copy(alpha = 0.2f),
-                                    shape = RoundedCornerShape(6.dp),
-                                    modifier = Modifier.clickable(enabled = uiState.availableFactories.size > 1) {
-                                        showFactoryDropdown = true
-                                    }
+                                    shape = RoundedCornerShape(6.dp)
                                 ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = uiState.factoryName,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color.White
-                                        )
-                                        if (uiState.availableFactories.size > 1) {
-                                            Spacer(modifier = Modifier.width(2.dp))
-                                            Icon(
-                                                Icons.Default.ArrowDropDown,
-                                                contentDescription = "تبديل المصنع",
-                                                tint = Color.White,
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                        }
-                                    }
-                                }
-                                DropdownMenu(
-                                    expanded = showFactoryDropdown,
-                                    onDismissRequest = { showFactoryDropdown = false }
-                                ) {
-                                    uiState.availableFactories.forEach { factory ->
-                                        val isSelected = factory.id == uiState.selectedFactoryId
-                                        DropdownMenuItem(
-                                            text = {
-                                                Row(
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                                    verticalAlignment = Alignment.CenterVertically
-                                                ) {
-                                                    Text(
-                                                        text = "${factory.name} (${factory.code})",
-                                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                                        color = if (isSelected) FactoryOrange else FactoryDark
-                                                    )
-                                                    if (isSelected) {
-                                                        Icon(Icons.Default.Check, contentDescription = null, tint = FactoryOrange, modifier = Modifier.size(16.dp))
-                                                    }
-                                                }
-                                            },
-                                            onClick = {
-                                                showFactoryDropdown = false
-                                                viewModel.selectFactory(factory)
-                                            }
-                                        )
-                                    }
+                                    Text(
+                                        text = uiState.factoryName,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                    )
                                 }
                             }
                         }
@@ -133,6 +95,18 @@ fun ProductionHomeScreen(
                     }
                 },
                 actions = {
+                    FilledTonalButton(
+                        onClick = { viewModel.toggleFawryMode(true) },
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = FactoryGreen,
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                        modifier = Modifier.height(34.dp)
+                    ) {
+                        Text("⚡ وضع فوري", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
                     IconButton(onClick = { viewModel.loadData() }) {
                         Icon(Icons.Default.Refresh, contentDescription = "تحديث", tint = Color.White)
                     }
@@ -231,7 +205,7 @@ fun ProductionHomeScreen(
                                     color = FactoryDark
                                 )
                                 Text(
-                                    text = "المسلّم: ${pending.supervisorName} (${pending.shiftDisplay})",
+                                    text = "الزميل المسلّم: ${pending.supervisorName} (${pending.shiftDisplay})",
                                     fontSize = 12.sp,
                                     color = FactoryTextSecondary
                                 )
@@ -249,92 +223,66 @@ fun ProductionHomeScreen(
                 }
             }
 
-            // 2. Shift Selector
+            // 2. Shift Badge (إظهار وردية العمل المحددة فقط)
             item {
+                val currentShiftName = when (uiState.selectedShift) {
+                    "FIRST" -> "الوردية 1 (صباحية)"
+                    "SECOND" -> "الوردية 2 (مسائية)"
+                    "THIRD" -> "الوردية 3 (ليلية)"
+                    else -> uiState.selectedShift
+                }
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(14.dp),
                     colors = CardDefaults.cardColors(containerColor = FactorySurface),
                     border = androidx.compose.foundation.BorderStroke(1.dp, FactoryCardBorder)
                 ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
-                        Text(
-                            text = "اختر الوردية الحالية:",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp,
-                            color = FactoryTextSecondary
-                        )
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            val shifts = listOf(
-                                "FIRST" to "الوردية 1 (صباحية)",
-                                "SECOND" to "الوردية 2 (مسائية)",
-                                "THIRD" to "الوردية 3 (ليلية)"
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("⏰", fontSize = 20.sp)
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "وردية العمل المحددة:",
+                                fontSize = 11.sp,
+                                color = FactoryTextMuted
                             )
-                            shifts.forEach { (shiftKey, shiftName) ->
-                                val isSelected = uiState.selectedShift == shiftKey
-                                val isAssigned = uiState.currentUser?.shift == shiftKey
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .background(
-                                            if (isSelected) FactoryNavy else FactorySurfaceVariant,
-                                            RoundedCornerShape(10.dp)
-                                        )
-                                        .border(
-                                            if (isAssigned && !isSelected) 1.5.dp else 1.dp,
-                                            when {
-                                                isSelected -> FactoryNavy
-                                                isAssigned -> FactoryOrange
-                                                else -> FactoryCardBorder
-                                            },
-                                            RoundedCornerShape(10.dp)
-                                        )
-                                        .clickable { viewModel.setShift(shiftKey) }
-                                        .padding(vertical = 9.dp, horizontal = 2.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                        Text(
-                                            text = shiftName,
-                                            fontSize = 11.sp,
-                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                            color = if (isSelected) Color.White else FactoryTextPrimary
-                                        )
-                                        if (isAssigned) {
-                                            Spacer(modifier = Modifier.height(2.dp))
-                                            Text(
-                                                text = "⭐ ورديتك",
-                                                fontSize = 9.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = if (isSelected) FactoryLightOrange else FactoryOrangeDark
-                                            )
-                                        }
-                                    }
-                                }
-                            }
+                            Text(
+                                text = currentShiftName,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp,
+                                color = FactoryDark
+                            )
                         }
                     }
                 }
             }
 
-            // 3. Quick Action: Friday Prayer Button
-            item {
-                Button(
-                    onClick = { viewModel.addFridayPrayerStoppage() },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = FactoryTeal),
-                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 1.dp)
-                ) {
-                    Icon(Icons.Outlined.PauseCircle, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color.White)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("إيقاف صلاة الجمعة لجميع الماكينات (60 دقيقة)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color.White)
+            // 3. Quick Action: Friday Prayer Button (يوم الجمعة فقط)
+            val isFriday = try {
+                java.time.LocalDate.now().dayOfWeek == java.time.DayOfWeek.FRIDAY
+            } catch (_: Exception) {
+                false
+            }
+            if (isFriday) {
+                item {
+                    Button(
+                        onClick = { viewModel.addFridayPrayerStoppage() },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = FactoryTeal),
+                        elevation = ButtonDefaults.buttonElevation(defaultElevation = 1.dp)
+                    ) {
+                        Icon(Icons.Outlined.PauseCircle, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color.White)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("إيقاف صلاة الجمعة لجميع الماكينات (60 دقيقة)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color.White)
+                    }
                 }
             }
 

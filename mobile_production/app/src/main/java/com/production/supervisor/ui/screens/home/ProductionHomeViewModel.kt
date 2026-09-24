@@ -12,6 +12,13 @@ import kotlinx.coroutines.launch
 import java.time.LocalDate
 import javax.inject.Inject
 
+enum class WizardSubStep {
+    STATUS,     // السؤال الرئيسي: شغالة تمام أم عطلانة
+    WEIGHT,     // إدخال الوزن بواسطة كيبورد ATM
+    STOPPAGE,   // تسجيل سبب التوقف والمدة
+    SUMMARY     // شاشة المراجعة والتسليم النهائي
+}
+
 data class ProductionHomeUiState(
     val selectedShift: String = "FIRST", // FIRST, SECOND, THIRD
     val currentDate: String = LocalDate.now().toString(),
@@ -31,7 +38,13 @@ data class ProductionHomeUiState(
     val message: String? = null,
     val selectedAssetForEntry: AssetEntity? = null,
     val isStoppageDialogVisible: Boolean = false,
-    val isHandoverDialogVisible: Boolean = false
+    val isHandoverDialogVisible: Boolean = false,
+    // Fawry Wizard Mode State
+    val isFawryMode: Boolean = true,
+    val wizardStarted: Boolean = false,
+    val wizardAssetIndex: Int = 0,
+    val wizardSubStep: WizardSubStep = WizardSubStep.STATUS,
+    val exceptionAssetForEdit: AssetEntity? = null
 )
 
 @HiltViewModel
@@ -231,6 +244,235 @@ class ProductionHomeViewModel @Inject constructor(
                     message = "تم إنهاء الوردية وجاهزة لاستلام المشرف التالي"
                 )
             }
+        }
+    }
+
+    // ==========================================
+    // Fawry Wizard Mode Actions & State Handlers
+    // ==========================================
+
+    fun toggleFawryMode(enabled: Boolean) {
+        _uiState.update { it.copy(isFawryMode = enabled) }
+    }
+
+    fun startWizard(targetIndex: Int = 0) {
+        val assets = _uiState.value.assets
+        val firstUnrecordedIndex = assets.indexOfFirst { _uiState.value.entries[it.id] == null }
+        val startIndex = if (targetIndex != 0) {
+            targetIndex.coerceIn(0, (assets.size - 1).coerceAtLeast(0))
+        } else if (firstUnrecordedIndex != -1) {
+            firstUnrecordedIndex
+        } else {
+            0
+        }
+        _uiState.update {
+            it.copy(
+                wizardStarted = true,
+                wizardAssetIndex = startIndex,
+                wizardSubStep = WizardSubStep.STATUS
+            )
+        }
+    }
+
+    fun exitWizardToWelcome() {
+        _uiState.update {
+            it.copy(
+                wizardStarted = false,
+                wizardSubStep = WizardSubStep.STATUS
+            )
+        }
+    }
+
+    fun setWizardAssetIndex(index: Int) {
+        val totalAssets = _uiState.value.assets.size
+        if (index in 0 until totalAssets) {
+            _uiState.update {
+                it.copy(
+                    wizardStarted = true,
+                    wizardAssetIndex = index,
+                    wizardSubStep = WizardSubStep.STATUS
+                )
+            }
+        }
+    }
+
+    fun setWizardSubStep(step: WizardSubStep) {
+        _uiState.update { it.copy(wizardSubStep = step) }
+    }
+
+    fun nextWizardMachine() {
+        val totalAssets = _uiState.value.assets.size
+        val currentIndex = _uiState.value.wizardAssetIndex
+        if (currentIndex + 1 < totalAssets) {
+            _uiState.update {
+                it.copy(
+                    wizardAssetIndex = currentIndex + 1,
+                    wizardSubStep = WizardSubStep.STATUS
+                )
+            }
+        } else {
+            _uiState.update {
+                it.copy(
+                    wizardSubStep = WizardSubStep.SUMMARY
+                )
+            }
+        }
+    }
+
+    fun previousWizardMachine() {
+        val currentIndex = _uiState.value.wizardAssetIndex
+        if (_uiState.value.wizardSubStep == WizardSubStep.SUMMARY) {
+            _uiState.update {
+                it.copy(
+                    wizardSubStep = WizardSubStep.STATUS,
+                    wizardAssetIndex = (it.assets.size - 1).coerceAtLeast(0)
+                )
+            }
+        } else if (_uiState.value.wizardSubStep != WizardSubStep.STATUS) {
+            _uiState.update { it.copy(wizardSubStep = WizardSubStep.STATUS) }
+        } else if (currentIndex > 0) {
+            _uiState.update {
+                it.copy(
+                    wizardAssetIndex = currentIndex - 1,
+                    wizardSubStep = WizardSubStep.STATUS
+                )
+            }
+        } else {
+            _uiState.update { it.copy(wizardStarted = false) }
+        }
+    }
+
+    fun goToWizardSummary() {
+        _uiState.update { it.copy(wizardStarted = true, wizardSubStep = WizardSubStep.SUMMARY) }
+    }
+
+    fun openExceptionDialog(asset: AssetEntity) {
+        _uiState.update { it.copy(exceptionAssetForEdit = asset) }
+    }
+
+    fun closeExceptionDialog() {
+        _uiState.update { it.copy(exceptionAssetForEdit = null) }
+    }
+
+    fun saveFawryWorkingEntry(
+        asset: AssetEntity,
+        weightKg: Double,
+        customOperatorId: Int? = null,
+        customProductId: Int? = null,
+        customCavities: Int? = null,
+        notes: String = ""
+    ) {
+        viewModelScope.launch {
+            val validReportId = if (_uiState.value.currentReportId.isNotBlank()) {
+                _uiState.value.currentReportId
+            } else {
+                val rep = repository.getOrCreateShiftReport(_uiState.value.currentDate, _uiState.value.selectedShift)
+                _uiState.update { it.copy(currentReportId = rep.clientReportId) }
+                rep.clientReportId
+            }
+
+            val operator = customOperatorId?.let { id -> _uiState.value.operators.find { it.id == id } }
+            val product = customProductId?.let { id -> _uiState.value.products.find { it.id == id } }
+
+            val resolvedOperatorId = operator?.id ?: asset.defaultOperatorId
+            val resolvedOperatorName = operator?.name ?: asset.defaultOperatorName ?: ""
+            val resolvedProductId = product?.id ?: asset.defaultProductId
+            val resolvedProductName = product?.name ?: asset.defaultProductName ?: ""
+            val resolvedCavities = customCavities ?: asset.originalCavities
+
+            val existing = _uiState.value.entries[asset.id]
+            val entry = MachineEntryEntity(
+                id = existing?.id ?: 0,
+                clientReportId = validReportId,
+                assetId = asset.id,
+                assetCode = asset.assetCode,
+                operatorId = resolvedOperatorId,
+                operatorName = resolvedOperatorName,
+                originalOperatorId = asset.defaultOperatorId,
+                originalOperatorName = asset.defaultOperatorName ?: "",
+                operatorChanged = (resolvedOperatorId != asset.defaultOperatorId),
+                productId = resolvedProductId,
+                productName = resolvedProductName,
+                originalProductId = asset.defaultProductId,
+                originalProductName = asset.defaultProductName ?: "",
+                productChanged = (resolvedProductId != asset.defaultProductId),
+                originalCavities = asset.originalCavities,
+                currentCavities = resolvedCavities,
+                operationMode = "AUTO",
+                coolingTimeSeconds = asset.coolingTimeSeconds,
+                cycleTimeSeconds = asset.cycleTimeSeconds,
+                rawMaterial = "",
+                finalProductionWeightKg = weightKg,
+                targetCycleProduction = asset.targetCycleProduction,
+                packagingType = "براميل",
+                notes = notes
+            )
+
+            repository.saveMachineEntry(entry)
+            _uiState.update { it.copy(message = "تم تسجيل ماكينة ${asset.assetCode}: $weightKg كجم") }
+            nextWizardMachine()
+        }
+    }
+
+    fun saveFawryStoppage(
+        asset: AssetEntity,
+        stoppageType: String,
+        stoppageTypeDisplay: String,
+        durationMinutes: Int,
+        notes: String = "",
+        partialWeightKg: Double = 0.0
+    ) {
+        viewModelScope.launch {
+            val validReportId = if (_uiState.value.currentReportId.isNotBlank()) {
+                _uiState.value.currentReportId
+            } else {
+                val rep = repository.getOrCreateShiftReport(_uiState.value.currentDate, _uiState.value.selectedShift)
+                _uiState.update { it.copy(currentReportId = rep.clientReportId) }
+                rep.clientReportId
+            }
+
+            // 1. Add stoppage
+            val stoppage = StoppageEntity(
+                clientReportId = validReportId,
+                assetId = asset.id,
+                assetCode = asset.assetCode,
+                stoppageType = stoppageType,
+                stoppageTypeDisplay = stoppageTypeDisplay,
+                description = notes.ifBlank { "عطل ماكينة ${asset.assetCode} ($stoppageTypeDisplay)" },
+                durationMinutes = durationMinutes,
+                actionTaken = "تم تسجيل توقف: $stoppageTypeDisplay"
+            )
+            repository.addStoppage(stoppage)
+
+            // 2. Add entry (with 0.0 or partial production weight if any)
+            val existing = _uiState.value.entries[asset.id]
+            val entry = MachineEntryEntity(
+                id = existing?.id ?: 0,
+                clientReportId = validReportId,
+                assetId = asset.id,
+                assetCode = asset.assetCode,
+                operatorId = asset.defaultOperatorId,
+                operatorName = asset.defaultOperatorName ?: "",
+                originalOperatorId = asset.defaultOperatorId,
+                originalOperatorName = asset.defaultOperatorName ?: "",
+                productId = asset.defaultProductId,
+                productName = asset.defaultProductName ?: "",
+                originalProductId = asset.defaultProductId,
+                originalProductName = asset.defaultProductName ?: "",
+                originalCavities = asset.originalCavities,
+                currentCavities = asset.originalCavities,
+                operationMode = "AUTO",
+                coolingTimeSeconds = asset.coolingTimeSeconds,
+                cycleTimeSeconds = asset.cycleTimeSeconds,
+                rawMaterial = "",
+                finalProductionWeightKg = partialWeightKg,
+                targetCycleProduction = asset.targetCycleProduction,
+                notes = "ماكينة متوقفة: $stoppageTypeDisplay (${durationMinutes} دقيقة)"
+            )
+            repository.saveMachineEntry(entry)
+
+            _uiState.update { it.copy(message = "تم تسجيل توقف ماكينة ${asset.assetCode}: $stoppageTypeDisplay") }
+            nextWizardMachine()
         }
     }
 
