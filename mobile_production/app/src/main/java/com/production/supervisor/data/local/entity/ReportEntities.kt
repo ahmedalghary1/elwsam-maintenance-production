@@ -51,9 +51,15 @@ data class MachineEntryEntity(
     val coolingTimeSeconds: Double = 0.0,
     val cycleTimeSeconds: Double = 0.0,
     val rawMaterial: String = "",
+    val rawMaterialOptionId: Int? = null,
     val finalProductionWeightKg: Double = 0.0,
+    val finalProductionQuantity: Double = 0.0,
+    val finalProductionUnitId: Int? = null,
+    val finalProductionUnitName: String = "كجم",
     val targetCycleProduction: Double = 0.0,
+    val targetCycleUnitName: String = "",
     val packagingType: String = "", // كراتين، براميل، شكاير...
+    val packagingOptionId: Int? = null,
     val notes: String = ""
 )
 

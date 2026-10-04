@@ -31,6 +31,7 @@ data class ProductionHomeUiState(
     val assets: List<AssetEntity> = emptyList(),
     val products: List<ProductEntity> = emptyList(),
     val operators: List<OperatorEntity> = emptyList(),
+    val productionOptions: List<ProductionOptionEntity> = emptyList(),
     val entries: Map<Int, MachineEntryEntity> = emptyMap(), // assetId -> entry
     val stoppages: List<StoppageEntity> = emptyList(),
     val pendingHandover: ShiftReportDto? = null,
@@ -79,6 +80,11 @@ class ProductionHomeViewModel @Inject constructor(
         viewModelScope.launch {
             repository.getOperatorsFlow().collect { opList ->
                 _uiState.update { it.copy(operators = opList) }
+            }
+        }
+        viewModelScope.launch {
+            repository.getProductionOptionsFlow().collect { options ->
+                _uiState.update { it.copy(productionOptions = options) }
             }
         }
         viewModelScope.launch {
@@ -356,11 +362,20 @@ class ProductionHomeViewModel @Inject constructor(
 
     fun saveFawryWorkingEntry(
         asset: AssetEntity,
-        weightKg: Double,
+        quantity: Double,
+        finalUnit: ProductionOptionEntity?,
+        currentCavities: Int,
+        rawMaterial: ProductionOptionEntity?,
+        packaging: ProductionOptionEntity?,
+        coolingTimeSeconds: Double,
+        cycleTimeSeconds: Double,
+        operationMode: String,
         customOperatorId: Int? = null,
         customProductId: Int? = null,
-        customCavities: Int? = null,
-        notes: String = ""
+        clearOperator: Boolean = false,
+        clearProduct: Boolean = false,
+        notes: String = "",
+        advance: Boolean = true
     ) {
         viewModelScope.launch {
             val validReportId = if (_uiState.value.currentReportId.isNotBlank()) {
@@ -374,11 +389,18 @@ class ProductionHomeViewModel @Inject constructor(
             val operator = customOperatorId?.let { id -> _uiState.value.operators.find { it.id == id } }
             val product = customProductId?.let { id -> _uiState.value.products.find { it.id == id } }
 
-            val resolvedOperatorId = operator?.id ?: asset.defaultOperatorId
-            val resolvedOperatorName = operator?.name ?: asset.defaultOperatorName ?: ""
-            val resolvedProductId = product?.id ?: asset.defaultProductId
-            val resolvedProductName = product?.name ?: asset.defaultProductName ?: ""
-            val resolvedCavities = customCavities ?: asset.originalCavities
+            val resolvedOperatorId = if (clearOperator) null else operator?.id ?: asset.defaultOperatorId
+            val resolvedOperatorName = if (clearOperator) "" else operator?.name ?: asset.defaultOperatorName ?: ""
+            val resolvedProductId = if (clearProduct) null else product?.id ?: asset.defaultProductId
+            val resolvedProductName = if (clearProduct) "" else product?.name ?: asset.defaultProductName ?: ""
+            val selectedUnit = finalUnit ?: _uiState.value.productionOptions.find { it.id == asset.defaultFinalUnitId }
+                ?: _uiState.value.productionOptions.firstOrNull { it.category == "FINAL_UNIT" && it.name == "كجم" }
+            val selectedMaterial = rawMaterial ?: _uiState.value.productionOptions.find { it.id == asset.defaultRawMaterialId }
+            val selectedPackaging = packaging ?: _uiState.value.productionOptions.find { it.id == asset.defaultPackagingId }
+            val unitName = selectedUnit?.name ?: asset.defaultFinalUnitName ?: "كجم"
+            val kgFactor = selectedUnit?.kgPerUnit
+            val weightKg = if (kgFactor != null) quantity * kgFactor
+                else if (unitName in setOf("كجم", "كيلو", "كيلوجرام")) quantity else 0.0
 
             val existing = _uiState.value.entries[asset.id]
             val entry = MachineEntryEntity(
@@ -397,20 +419,26 @@ class ProductionHomeViewModel @Inject constructor(
                 originalProductName = asset.defaultProductName ?: "",
                 productChanged = (resolvedProductId != asset.defaultProductId),
                 originalCavities = asset.originalCavities,
-                currentCavities = resolvedCavities,
-                operationMode = "AUTO",
-                coolingTimeSeconds = asset.coolingTimeSeconds,
-                cycleTimeSeconds = asset.cycleTimeSeconds,
-                rawMaterial = "",
+                currentCavities = currentCavities.coerceAtLeast(1),
+                operationMode = operationMode,
+                coolingTimeSeconds = coolingTimeSeconds,
+                cycleTimeSeconds = cycleTimeSeconds,
+                rawMaterial = selectedMaterial?.name ?: "",
+                rawMaterialOptionId = selectedMaterial?.id,
                 finalProductionWeightKg = weightKg,
+                finalProductionQuantity = quantity,
+                finalProductionUnitId = selectedUnit?.id,
+                finalProductionUnitName = unitName,
                 targetCycleProduction = asset.targetCycleProduction,
-                packagingType = "براميل",
+                targetCycleUnitName = asset.targetCycleUnitName ?: "",
+                packagingType = selectedPackaging?.name ?: "",
+                packagingOptionId = selectedPackaging?.id,
                 notes = notes
             )
 
             repository.saveMachineEntry(entry)
-            _uiState.update { it.copy(message = "تم تسجيل ماكينة ${asset.assetCode}: $weightKg كجم") }
-            nextWizardMachine()
+            _uiState.update { it.copy(message = "تم تسجيل ماكينة ${asset.assetCode}: $quantity $unitName") }
+            if (advance) nextWizardMachine()
         }
     }
 
@@ -420,7 +448,8 @@ class ProductionHomeViewModel @Inject constructor(
         stoppageTypeDisplay: String,
         durationMinutes: Int,
         notes: String = "",
-        partialWeightKg: Double = 0.0
+        partialWeightKg: Double = 0.0,
+        currentCavities: Int? = null
     ) {
         viewModelScope.launch {
             val validReportId = if (_uiState.value.currentReportId.isNotBlank()) {
@@ -460,13 +489,21 @@ class ProductionHomeViewModel @Inject constructor(
                 originalProductId = asset.defaultProductId,
                 originalProductName = asset.defaultProductName ?: "",
                 originalCavities = asset.originalCavities,
-                currentCavities = asset.originalCavities,
+                currentCavities = (currentCavities ?: asset.originalCavities).coerceAtLeast(1),
                 operationMode = "AUTO",
                 coolingTimeSeconds = asset.coolingTimeSeconds,
                 cycleTimeSeconds = asset.cycleTimeSeconds,
-                rawMaterial = "",
+                rawMaterial = _uiState.value.productionOptions.find { it.id == asset.defaultRawMaterialId }?.name.orEmpty(),
+                rawMaterialOptionId = asset.defaultRawMaterialId,
                 finalProductionWeightKg = partialWeightKg,
+                finalProductionQuantity = partialWeightKg,
+                finalProductionUnitId = _uiState.value.productionOptions.find { it.id == asset.defaultFinalUnitId && it.name == "كجم" }?.id
+                    ?: _uiState.value.productionOptions.firstOrNull { it.category == "FINAL_UNIT" && it.name == "كجم" }?.id,
+                finalProductionUnitName = "كجم",
                 targetCycleProduction = asset.targetCycleProduction,
+                targetCycleUnitName = asset.targetCycleUnitName.orEmpty(),
+                packagingType = _uiState.value.productionOptions.find { it.id == asset.defaultPackagingId }?.name.orEmpty(),
+                packagingOptionId = asset.defaultPackagingId,
                 notes = "ماكينة متوقفة: $stoppageTypeDisplay (${durationMinutes} دقيقة)"
             )
             repository.saveMachineEntry(entry)

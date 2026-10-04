@@ -15,6 +15,14 @@ data class AssetEntity(
     val defaultProductName: String?,
     val defaultOperatorId: Int? = null,
     val defaultOperatorName: String? = null,
+    val defaultRawMaterialId: Int? = null,
+    val defaultRawMaterialName: String? = null,
+    val defaultFinalUnitId: Int? = null,
+    val defaultFinalUnitName: String? = null,
+    val targetCycleUnitId: Int? = null,
+    val targetCycleUnitName: String? = null,
+    val defaultPackagingId: Int? = null,
+    val defaultPackagingName: String? = null,
     val originalCavities: Int,
     val coolingTimeSeconds: Double,
     val cycleTimeSeconds: Double,
@@ -58,4 +66,12 @@ data class OperatorEntity(
     val name: String,
     val phone: String,
     val isActive: Boolean
+)
+
+@Entity(tableName = "production_options", indices = [androidx.room.Index(value = ["category", "name"])])
+data class ProductionOptionEntity(
+    @PrimaryKey val id: Int,
+    val category: String,
+    val name: String,
+    val kgPerUnit: Double? = null
 )

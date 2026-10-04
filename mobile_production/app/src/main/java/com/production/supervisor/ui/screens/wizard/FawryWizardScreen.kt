@@ -36,12 +36,23 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.production.supervisor.data.local.entity.AssetEntity
 import com.production.supervisor.data.local.entity.MachineEntryEntity
+import com.production.supervisor.data.local.entity.ProductionOptionEntity
 import com.production.supervisor.data.local.entity.StoppageEntity
 import com.production.supervisor.ui.screens.handover.HandoverDialog
+import com.production.supervisor.ui.components.ProductionOptionSelector
 import com.production.supervisor.ui.screens.home.ProductionHomeUiState
 import com.production.supervisor.ui.screens.home.ProductionHomeViewModel
 import com.production.supervisor.ui.screens.home.WizardSubStep
 import com.production.supervisor.ui.theme.*
+
+private fun productionQuantitySummary(entries: Collection<MachineEntryEntity>): String =
+    entries.filter { it.finalProductionQuantity > 0.0 }
+        .groupBy { it.finalProductionUnitName.ifBlank { "كجم" } }
+        .map { (unit, rows) ->
+            val total = rows.sumOf { it.finalProductionQuantity }
+            val formatted = if (total % 1.0 == 0.0) total.toInt().toString() else "%.2f".format(total)
+            "$formatted $unit"
+        }.joinToString(" • ").ifBlank { "لا يوجد إنتاج مسجل" }
 
 /**
  * الشاشة الرئيسية لنظام "ماكينة فوري / الخطوة بخطوة" (Fawry Wizard Mode)
@@ -222,12 +233,20 @@ fun FawryWizardScreen(
                                 asset = currentAsset,
                                 machineIndex = uiState.wizardAssetIndex,
                                 totalMachines = uiState.assets.size,
-                                initialWeight = currentEntry?.finalProductionWeightKg ?: 0.0,
+                                options = uiState.productionOptions,
+                                initialEntry = currentEntry,
                                 isLastMachine = uiState.wizardAssetIndex == uiState.assets.size - 1,
-                                onSaveWeight = { weight ->
+                                onSaveWeight = { quantity, unit, cavities, material, packaging, cooling, cycle, mode ->
                                     viewModel.saveFawryWorkingEntry(
                                         asset = currentAsset,
-                                        weightKg = weight
+                                        quantity = quantity,
+                                        finalUnit = unit,
+                                        currentCavities = cavities,
+                                        rawMaterial = material,
+                                        packaging = packaging,
+                                        coolingTimeSeconds = cooling,
+                                        cycleTimeSeconds = cycle,
+                                        operationMode = mode
                                     )
                                 },
                                 onBack = { viewModel.setWizardSubStep(WizardSubStep.STATUS) }
@@ -241,15 +260,17 @@ fun FawryWizardScreen(
                                 asset = currentAsset,
                                 machineIndex = uiState.wizardAssetIndex,
                                 totalMachines = uiState.assets.size,
+                                initialCurrentCavities = currentEntry?.currentCavities ?: currentAsset.originalCavities,
                                 isLastMachine = uiState.wizardAssetIndex == uiState.assets.size - 1,
-                                onSaveStoppage = { reasonCode, reasonDisplay, durationMinutes, notes, partialWeight ->
+                                onSaveStoppage = { reasonCode, reasonDisplay, durationMinutes, notes, partialWeight, cavities ->
                                     viewModel.saveFawryStoppage(
                                         asset = currentAsset,
                                         stoppageType = reasonCode,
                                         stoppageTypeDisplay = reasonDisplay,
                                         durationMinutes = durationMinutes,
                                         notes = notes,
-                                        partialWeightKg = partialWeight
+                                        partialWeightKg = partialWeight,
+                                        currentCavities = cavities
                                     )
                                 },
                                 onBack = { viewModel.setWizardSubStep(WizardSubStep.STATUS) }
@@ -272,19 +293,29 @@ fun FawryWizardScreen(
                     asset = asset,
                     operators = uiState.operators,
                     products = uiState.products,
-                    currentOperatorId = uiState.entries[asset.id]?.operatorId ?: asset.defaultOperatorId,
-                    currentProductId = uiState.entries[asset.id]?.productId ?: asset.defaultProductId,
+                    currentOperatorId = if (uiState.entries[asset.id] != null) uiState.entries[asset.id]!!.operatorId else asset.defaultOperatorId,
+                    currentProductId = if (uiState.entries[asset.id] != null) uiState.entries[asset.id]!!.productId else asset.defaultProductId,
                     currentCavities = uiState.entries[asset.id]?.currentCavities ?: asset.originalCavities,
                     onDismiss = { viewModel.closeExceptionDialog() },
                     onConfirm = { opId, prodId, cavs ->
                         // Save or update existing entry with exception values
-                        val existingWeight = uiState.entries[asset.id]?.finalProductionWeightKg ?: 0.0
+                        val existing = uiState.entries[asset.id]
                         viewModel.saveFawryWorkingEntry(
                             asset = asset,
-                            weightKg = existingWeight,
+                            quantity = existing?.finalProductionQuantity ?: existing?.finalProductionWeightKg ?: 0.0,
+                            finalUnit = uiState.productionOptions.find { it.id == (existing?.finalProductionUnitId ?: asset.defaultFinalUnitId) }
+                                ?: uiState.productionOptions.firstOrNull { it.category == "FINAL_UNIT" && it.name == "كجم" },
+                            currentCavities = cavs,
+                            rawMaterial = uiState.productionOptions.find { it.id == (existing?.rawMaterialOptionId ?: asset.defaultRawMaterialId) },
+                            packaging = uiState.productionOptions.find { it.id == (existing?.packagingOptionId ?: asset.defaultPackagingId) },
+                            coolingTimeSeconds = existing?.coolingTimeSeconds ?: asset.coolingTimeSeconds,
+                            cycleTimeSeconds = existing?.cycleTimeSeconds ?: asset.cycleTimeSeconds,
+                            operationMode = existing?.operationMode ?: "AUTO",
                             customOperatorId = opId,
                             customProductId = prodId,
-                            customCavities = cavs
+                            clearOperator = opId == null,
+                            clearProduct = prodId == null,
+                            advance = false
                         )
                     }
                 )
@@ -634,9 +665,8 @@ private fun ShiftWelcomeView(
                     VerticalDivider(modifier = Modifier.height(30.dp), color = FactoryCardBorder)
 
                     Column {
-                        val totalKg = uiState.entries.values.sumOf { it.finalProductionWeightKg }
                         Text("إجمالي الإنتاج", fontSize = 12.sp, color = FactoryTextMuted)
-                        Text("${totalKg.toInt()} كجم", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = FactoryTeal)
+                        Text(productionQuantitySummary(uiState.entries.values), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = FactoryTeal)
                     }
                 }
 
@@ -1035,72 +1065,109 @@ private fun MachineWeightEntryView(
     asset: AssetEntity,
     machineIndex: Int,
     totalMachines: Int,
-    initialWeight: Double,
+    options: List<ProductionOptionEntity>,
+    initialEntry: MachineEntryEntity?,
     isLastMachine: Boolean,
-    onSaveWeight: (Double) -> Unit,
+    onSaveWeight: (Double, ProductionOptionEntity?, Int, ProductionOptionEntity?, ProductionOptionEntity?, Double, Double, String) -> Unit,
     onBack: () -> Unit
 ) {
+    val finalUnits = options.filter { it.category == "FINAL_UNIT" }
+    val materials = options.filter { it.category == "RAW_MATERIAL" }
+    val packagingOptions = options.filter { it.category == "PACKAGING" }
     var weightString by remember(asset.id) {
+        val initialWeight = initialEntry?.finalProductionQuantity ?: initialEntry?.finalProductionWeightKg ?: 0.0
         val initial = if (initialWeight > 0.0) {
             if (initialWeight % 1.0 == 0.0) initialWeight.toInt().toString() else initialWeight.toString()
         } else ""
         mutableStateOf(initial)
     }
+    var cavities by remember(asset.id, initialEntry?.id) { mutableIntStateOf((initialEntry?.currentCavities ?: asset.originalCavities).coerceAtLeast(1)) }
+    var selectedUnit by remember(asset.id, finalUnits, initialEntry?.finalProductionUnitId) {
+        mutableStateOf(finalUnits.find { it.id == initialEntry?.finalProductionUnitId }
+            ?: finalUnits.find { it.id == asset.defaultFinalUnitId }
+            ?: finalUnits.find { it.name in setOf("كجم", "كيلو", "كيلوجرام") }
+            ?: finalUnits.firstOrNull())
+    }
+    var selectedMaterial by remember(asset.id, materials, initialEntry?.rawMaterialOptionId) {
+        mutableStateOf(materials.find { it.id == initialEntry?.rawMaterialOptionId }
+            ?: materials.find { it.id == asset.defaultRawMaterialId })
+    }
+    var selectedPackaging by remember(asset.id, packagingOptions, initialEntry?.packagingOptionId) {
+        mutableStateOf(packagingOptions.find { it.id == initialEntry?.packagingOptionId }
+            ?: packagingOptions.find { it.id == asset.defaultPackagingId })
+    }
+    var coolingText by remember(asset.id, initialEntry?.id) { mutableStateOf((initialEntry?.coolingTimeSeconds ?: asset.coolingTimeSeconds).takeIf { it > 0 }?.toString() ?: "") }
+    var cycleText by remember(asset.id, initialEntry?.id) { mutableStateOf((initialEntry?.cycleTimeSeconds ?: asset.cycleTimeSeconds).takeIf { it > 0 }?.toString() ?: "") }
+    var operationMode by remember(asset.id, initialEntry?.id) { mutableStateOf(initialEntry?.operationMode ?: "AUTO") }
+    var showAdvanced by remember(asset.id) { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.SpaceBetween
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            // Header Bar
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "رجوع", tint = FactoryDark)
-                }
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = "ماكينة: ${asset.assetCode}",
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = FactoryDark
-                    )
-                    Text(
-                        text = "اكتب إجمالي الوزن المنتج للوردية بالكيلو",
-                        fontSize = 12.sp,
-                        color = FactoryTextSecondary
-                    )
-                }
-                Box(modifier = Modifier.size(48.dp)) // Placeholder for balance
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "رجوع", tint = FactoryDark) }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("ماكينة: ${asset.assetCode}", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = FactoryDark)
+                Text("البيانات التلقائية جاهزة؛ أدخل المتغير فقط", fontSize = 12.sp, color = FactoryTextSecondary)
             }
+            Box(Modifier.size(48.dp))
+        }
 
-            Spacer(modifier = Modifier.height(12.dp))
+        Card(colors = CardDefaults.cardColors(containerColor = FactorySurface), shape = RoundedCornerShape(14.dp)) {
+            Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("الإعدادات المعتمدة", fontWeight = FontWeight.Bold, color = FactoryNavy)
+                Text("العامل: ${asset.defaultOperatorName?.ifBlank { "غير محدد" } ?: "غير محدد"}  •  المنتج: ${asset.defaultProductName?.ifBlank { "غير محدد" } ?: "غير محدد"}", fontSize = 12.sp, color = FactoryTextSecondary)
+                Text("اللقم الأصلي: ${asset.originalCavities}  •  مستهدف الدورة: ${asset.targetCycleProduction} ${asset.targetCycleUnitName.orEmpty()}", fontSize = 12.sp, color = FactoryTextSecondary)
+            }
+        }
 
-            // The ATM Numpad Composable
-            AtmNumpad(
-                value = weightString,
-                onValueChange = { weightString = it },
-                unit = "كجم"
-            )
+        ProductionOptionSelector("وحدة كمية الإنتاج", finalUnits, selectedUnit, { selectedUnit = it }, allowNone = false)
+        AtmNumpad(value = weightString, onValueChange = { weightString = it }, unit = selectedUnit?.name ?: "اختر الوحدة")
+
+        Card(colors = CardDefaults.cardColors(containerColor = FactorySurface), shape = RoundedCornerShape(14.dp)) {
+            Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("بيانات الماكينة", fontWeight = FontWeight.Bold, color = FactoryNavy)
+                Text("عدد اللقم الحالية", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedButton(onClick = { if (cavities > 1) cavities-- }, modifier = Modifier.weight(1f).height(48.dp)) { Text("−", fontSize = 22.sp) }
+                    Surface(color = FactorySurfaceVariant, shape = RoundedCornerShape(10.dp), modifier = Modifier.weight(1f)) {
+                        Text(cavities.toString(), Modifier.padding(10.dp), textAlign = TextAlign.Center, fontSize = 20.sp, fontWeight = FontWeight.Black, color = FactoryNavy)
+                    }
+                    OutlinedButton(onClick = { cavities++ }, modifier = Modifier.weight(1f).height(48.dp)) { Text("+", fontSize = 22.sp) }
+                }
+                if (materials.isNotEmpty()) ProductionOptionSelector("الخامة", materials, selectedMaterial, { selectedMaterial = it }, noneLabel = "غير محددة")
+                if (packagingOptions.isNotEmpty()) ProductionOptionSelector("العبوة", packagingOptions, selectedPackaging, { selectedPackaging = it }, noneLabel = "غير محددة")
+                Text("حالة التشغيل", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    listOf("AUTO" to "أوتو", "MANUAL" to "يدوي").forEach { (value, label) ->
+                        Button(onClick = { operationMode = value }, modifier = Modifier.weight(1f).height(48.dp), colors = ButtonDefaults.buttonColors(containerColor = if (operationMode == value) FactoryGreen else FactorySurfaceVariant, contentColor = if (operationMode == value) Color.White else FactoryDark)) { Text(label, fontWeight = FontWeight.Bold) }
+                    }
+                }
+                TextButton(onClick = { showAdvanced = !showAdvanced }, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (showAdvanced) "إخفاء تعديل الأزمنة" else "تعديل أزمنة التبريد والدورة (اختياري)")
+                }
+                AnimatedVisibility(showAdvanced) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(value = coolingText, onValueChange = { coolingText = it }, modifier = Modifier.fillMaxWidth(), label = { Text("زمن التبريد بالثواني") }, supportingText = { Text("الافتراضي: ${asset.coolingTimeSeconds} ث") }, keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal), singleLine = true)
+                        OutlinedTextField(value = cycleText, onValueChange = { cycleText = it }, modifier = Modifier.fillMaxWidth(), label = { Text("زمن الدورة بالثواني") }, supportingText = { Text("الافتراضي: ${asset.cycleTimeSeconds} ث") }, keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal), singleLine = true)
+                    }
+                }
+            }
         }
 
         // Giant Action Button: حفظ والانتقال للماكينة التالية
-        val enteredWeight = weightString.toDoubleOrNull() ?: 0.0
-        val isValid = enteredWeight > 0.0
+        val enteredQuantity = weightString.toDoubleOrNull() ?: 0.0
+        val isValid = enteredQuantity > 0.0 && selectedUnit != null
 
         Button(
             onClick = {
                 if (isValid) {
-                    onSaveWeight(enteredWeight)
+                    onSaveWeight(enteredQuantity, selectedUnit, cavities, selectedMaterial, selectedPackaging, coolingText.toDoubleOrNull() ?: asset.coolingTimeSeconds, cycleText.toDoubleOrNull() ?: asset.cycleTimeSeconds, operationMode)
                 }
             },
             enabled = isValid,
@@ -1138,8 +1205,9 @@ private fun MachineStoppageEntryView(
     asset: AssetEntity,
     machineIndex: Int,
     totalMachines: Int,
+    initialCurrentCavities: Int,
     isLastMachine: Boolean,
-    onSaveStoppage: (reasonCode: String, reasonDisplay: String, durationMinutes: Int, notes: String, partialWeight: Double) -> Unit,
+    onSaveStoppage: (reasonCode: String, reasonDisplay: String, durationMinutes: Int, notes: String, partialWeight: Double, currentCavities: Int) -> Unit,
     onBack: () -> Unit
 ) {
     var selectedReason by remember { mutableStateOf("MACHINE_BREAKDOWN") }
@@ -1147,6 +1215,7 @@ private fun MachineStoppageEntryView(
     var selectedDurationMinutes by remember { mutableStateOf(60) }
     var partialWeightString by remember { mutableStateOf("") }
     var showWeightInput by remember { mutableStateOf(false) }
+    var currentCavities by remember(asset.id) { mutableIntStateOf(initialCurrentCavities.coerceAtLeast(1)) }
 
     val isFriday = try {
         java.time.LocalDate.now().dayOfWeek == java.time.DayOfWeek.FRIDAY
@@ -1213,6 +1282,17 @@ private fun MachineStoppageEntryView(
                     )
                 }
                 Box(modifier = Modifier.size(48.dp))
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Text("عدد اللقم الحالية", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = FactoryDark, modifier = Modifier.fillMaxWidth())
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedButton(onClick = { if (currentCavities > 1) currentCavities-- }, modifier = Modifier.weight(1f).height(48.dp)) { Text("−", fontSize = 22.sp) }
+                Surface(color = FactorySurfaceVariant, shape = RoundedCornerShape(10.dp), modifier = Modifier.weight(1f)) {
+                    Text(currentCavities.toString(), Modifier.padding(10.dp), textAlign = TextAlign.Center, fontSize = 20.sp, fontWeight = FontWeight.Black, color = FactoryNavy)
+                }
+                OutlinedButton(onClick = { currentCavities++ }, modifier = Modifier.weight(1f).height(48.dp)) { Text("+", fontSize = 22.sp) }
             }
 
             Spacer(modifier = Modifier.height(14.dp))
@@ -1378,7 +1458,8 @@ private fun MachineStoppageEntryView(
                     selectedReasonDisplay,
                     selectedDurationMinutes,
                     "",
-                    partialWeight
+                    partialWeight,
+                    currentCavities
                 )
             },
             modifier = Modifier
@@ -1416,7 +1497,6 @@ private fun ShiftSummaryView(
     val scrollState = rememberScrollState()
     val totalMachines = uiState.assets.size
     val recordedCount = uiState.entries.size
-    val totalWeight = uiState.entries.values.sumOf { it.finalProductionWeightKg }
     val stoppageCount = uiState.stoppages.mapNotNull { it.assetId }.distinct().size
     val workingCount = (recordedCount - stoppageCount).coerceAtLeast(0)
 
@@ -1486,8 +1566,8 @@ private fun ShiftSummaryView(
                         color = FactoryNavy
                     )
                     SummaryMetricPill(
-                        label = "إجمالي الوزن",
-                        value = "${totalWeight.toInt()} كجم",
+                        label = "الإنتاج",
+                        value = productionQuantitySummary(uiState.entries.values),
                         color = FactoryGreen
                     )
                     SummaryMetricPill(
@@ -1548,7 +1628,7 @@ private fun ShiftSummaryView(
                                         color = FactoryDark
                                     )
                                     Text(
-                                        text = if (stoppage != null) "عطل: ${stoppage.stoppageTypeDisplay} (${stoppage.durationMinutes} د)" else if (entry != null) "إنتاج: ${entry.finalProductionWeightKg} كجم" else "لم تسجل بعد",
+                                        text = if (stoppage != null) "عطل: ${stoppage.stoppageTypeDisplay} (${stoppage.durationMinutes} د)" else if (entry != null) "إنتاج: ${entry.finalProductionQuantity} ${entry.finalProductionUnitName}" else "لم تسجل بعد",
                                         fontSize = 11.sp,
                                         color = if (stoppage != null) FactoryOrangeDark else if (entry != null) FactoryGreenDark else FactoryTextMuted
                                     )

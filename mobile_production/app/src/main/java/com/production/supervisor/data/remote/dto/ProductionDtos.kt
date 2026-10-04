@@ -13,6 +13,7 @@ data class ProductionBootstrapDto(
     val assets: List<ProductionAssetDto>,
     val products: List<ProductDto>,
     val operators: List<MachineOperatorDto>,
+    @SerialName("production_options") val productionOptions: List<ProductionOptionDto> = emptyList(),
     @SerialName("pending_handover") val pendingHandover: ShiftReportDto? = null,
     @SerialName("today_reports") val todayReports: List<ShiftReportDto> = emptyList()
 )
@@ -41,10 +42,26 @@ data class MachineProductionDefaultDto(
     @SerialName("default_product_name") val defaultProductName: String? = null,
     @SerialName("default_operator") val defaultOperator: Int? = null,
     @SerialName("default_operator_name") val defaultOperatorName: String? = null,
+    @SerialName("default_raw_material") val defaultRawMaterial: Int? = null,
+    @SerialName("default_raw_material_name") val defaultRawMaterialName: String? = null,
+    @SerialName("default_final_unit") val defaultFinalUnit: Int? = null,
+    @SerialName("default_final_unit_name") val defaultFinalUnitName: String? = null,
+    @SerialName("target_cycle_unit") val targetCycleUnit: Int? = null,
+    @SerialName("target_cycle_unit_name") val targetCycleUnitName: String? = null,
+    @SerialName("default_packaging") val defaultPackaging: Int? = null,
+    @SerialName("default_packaging_name") val defaultPackagingName: String? = null,
     @SerialName("original_cavities") val originalCavities: Int = 1,
     @SerialName("cooling_time_seconds") val coolingTimeSeconds: Double = 0.0,
     @SerialName("cycle_time_seconds") val cycleTimeSeconds: Double = 0.0,
     @SerialName("target_cycle_production") val targetCycleProduction: Double = 0.0
+)
+
+@Serializable
+data class ProductionOptionDto(
+    val id: Int,
+    val category: String,
+    val name: String,
+    @SerialName("kg_per_unit") val kgPerUnit: Double? = null
 )
 
 @Serializable
@@ -109,8 +126,12 @@ data class MachineEntryInputDto(
     @SerialName("cooling_time_seconds") val coolingTimeSeconds: Double = 0.0,
     @SerialName("cycle_time_seconds") val cycleTimeSeconds: Double = 0.0,
     @SerialName("raw_material") val rawMaterial: String = "",
+    @SerialName("raw_material_option_id") val rawMaterialOptionId: Int? = null,
     @SerialName("final_production_weight_kg") val finalProductionWeightKg: Double = 0.0,
+    @SerialName("final_production_quantity") val finalProductionQuantity: Double? = null,
+    @SerialName("final_production_unit_id") val finalProductionUnitId: Int? = null,
     @SerialName("target_cycle_production") val targetCycleProduction: Double = 0.0,
+    @SerialName("packaging_option_id") val packagingOptionId: Int? = null,
     @SerialName("packaging_type") val packagingType: String = "",
     val notes: String = ""
 )

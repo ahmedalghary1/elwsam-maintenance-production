@@ -312,7 +312,7 @@ fun ProductionHomeScreen(
                             color = FactoryTextPrimary
                         )
                         Text(
-                            text = "إجمالي الوزن: $totalWeight كجم",
+                            text = "المحوّل إلى كجم: $totalWeight كجم",
                             fontWeight = FontWeight.Bold,
                             fontSize = 13.sp,
                             color = FactoryGreen
@@ -359,6 +359,7 @@ fun ProductionHomeScreen(
                 existingEntry = existingEntry,
                 operators = uiState.operators,
                 products = uiState.products,
+                productionOptions = uiState.productionOptions,
                 onDismiss = { viewModel.closeMachineEntry() },
                 onSave = { entry -> viewModel.saveMachineEntry(entry) }
             )
@@ -709,7 +710,7 @@ fun MachineCard(
                             Icon(Icons.Outlined.Scale, contentDescription = null, modifier = Modifier.size(13.dp), tint = FactoryGreenDark)
                             Spacer(modifier = Modifier.width(3.dp))
                             Text(
-                                text = "${entry.finalProductionWeightKg} كجم",
+                                text = "${entry.finalProductionQuantity} ${entry.finalProductionUnitName}",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = FactoryGreenDark

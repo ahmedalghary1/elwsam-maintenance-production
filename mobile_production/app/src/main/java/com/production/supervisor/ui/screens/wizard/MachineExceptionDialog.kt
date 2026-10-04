@@ -42,8 +42,8 @@ fun MachineExceptionDialog(
     onDismiss: () -> Unit,
     onConfirm: (selectedOperatorId: Int?, selectedProductId: Int?, selectedCavities: Int) -> Unit
 ) {
-    var selectedOpId by remember { mutableStateOf(currentOperatorId ?: asset.defaultOperatorId) }
-    var selectedProdId by remember { mutableStateOf(currentProductId ?: asset.defaultProductId) }
+    var selectedOpId by remember { mutableStateOf(currentOperatorId) }
+    var selectedProdId by remember { mutableStateOf(currentProductId) }
     var cavities by remember { mutableStateOf(currentCavities.coerceAtLeast(1)) }
     var activeTab by remember { mutableStateOf(0) } // 0: Operator, 1: Product, 2: Cavities
 
@@ -125,6 +125,14 @@ fun MachineExceptionDialog(
                                 modifier = Modifier.fillMaxSize(),
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
+                                item {
+                                    ItemSelectionCard(
+                                        title = "بدون تحديد عامل",
+                                        subtitle = "سيظل العامل غير مسجل لهذه الوردية",
+                                        isSelected = selectedOpId == null,
+                                        onClick = { selectedOpId = null }
+                                    )
+                                }
                                 items(operators) { op ->
                                     val isSelected = op.id == selectedOpId
                                     val isDefault = op.id == asset.defaultOperatorId
@@ -144,6 +152,14 @@ fun MachineExceptionDialog(
                                 modifier = Modifier.fillMaxSize(),
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
+                                item {
+                                    ItemSelectionCard(
+                                        title = "بدون تحديد منتج",
+                                        subtitle = "سيظل المنتج غير مسجل لهذه الوردية",
+                                        isSelected = selectedProdId == null,
+                                        onClick = { selectedProdId = null }
+                                    )
+                                }
                                 items(products) { prod ->
                                     val isSelected = prod.id == selectedProdId
                                     val isDefault = prod.id == asset.defaultProductId

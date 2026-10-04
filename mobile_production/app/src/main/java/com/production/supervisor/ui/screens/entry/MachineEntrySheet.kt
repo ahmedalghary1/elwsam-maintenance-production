@@ -33,6 +33,8 @@ import com.production.supervisor.data.local.entity.AssetEntity
 import com.production.supervisor.data.local.entity.MachineEntryEntity
 import com.production.supervisor.data.local.entity.OperatorEntity
 import com.production.supervisor.data.local.entity.ProductEntity
+import com.production.supervisor.data.local.entity.ProductionOptionEntity
+import com.production.supervisor.ui.components.ProductionOptionSelector
 import com.production.supervisor.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -43,6 +45,7 @@ fun MachineEntrySheet(
     existingEntry: MachineEntryEntity?,
     operators: List<OperatorEntity>,
     products: List<ProductEntity>,
+    productionOptions: List<ProductionOptionEntity>,
     onDismiss: () -> Unit,
     onSave: (MachineEntryEntity) -> Unit
 ) {
@@ -112,26 +115,33 @@ fun MachineEntrySheet(
         )
     }
 
-    var targetProductionText by remember(asset.id, existingEntry?.id) {
-        mutableStateOf(
-            existingEntry?.targetCycleProduction?.takeIf { it > 0 }?.toString()
-                ?: asset.targetCycleProduction.takeIf { it > 0 }?.toString()
-                ?: ""
-        )
-    }
-
     // 4. Operation Mode & Outputs
     var operationMode by remember(asset.id, existingEntry?.id) {
         mutableStateOf(existingEntry?.operationMode ?: "AUTO")
     }
-    var rawMaterial by remember(asset.id, existingEntry?.id) {
-        mutableStateOf(existingEntry?.rawMaterial ?: "")
+    val materialOptions = productionOptions.filter { it.category == "RAW_MATERIAL" }
+    val finalUnits = productionOptions.filter { it.category == "FINAL_UNIT" }
+    val packagingOptions = productionOptions.filter { it.category == "PACKAGING" }
+    var selectedMaterial by remember(asset.id, existingEntry?.id, materialOptions) {
+        mutableStateOf(materialOptions.find { it.id == existingEntry?.rawMaterialOptionId }
+            ?: materialOptions.find { it.name == existingEntry?.rawMaterial }
+            ?: materialOptions.find { it.id == asset.defaultRawMaterialId })
     }
     var weightText by remember(asset.id, existingEntry?.id) {
-        mutableStateOf(existingEntry?.finalProductionWeightKg?.let { if (it > 0) it.toString() else "" } ?: "")
+        val value = existingEntry?.finalProductionQuantity ?: existingEntry?.finalProductionWeightKg ?: 0.0
+        mutableStateOf(if (value > 0) value.toString() else "")
     }
-    var packagingType by remember(asset.id, existingEntry?.id) {
-        mutableStateOf(existingEntry?.packagingType ?: "كراتين")
+    var selectedUnit by remember(asset.id, existingEntry?.id, finalUnits) {
+        mutableStateOf(finalUnits.find { it.id == existingEntry?.finalProductionUnitId }
+            ?: finalUnits.find { it.name == existingEntry?.finalProductionUnitName }
+            ?: finalUnits.find { it.id == asset.defaultFinalUnitId }
+            ?: finalUnits.find { it.name in setOf("كجم", "كيلو", "كيلوجرام") }
+            ?: finalUnits.firstOrNull())
+    }
+    var selectedPackaging by remember(asset.id, existingEntry?.id, packagingOptions) {
+        mutableStateOf(packagingOptions.find { it.id == existingEntry?.packagingOptionId }
+            ?: packagingOptions.find { it.name == existingEntry?.packagingType }
+            ?: packagingOptions.find { it.id == asset.defaultPackagingId })
     }
     var notes by remember(asset.id, existingEntry?.id) {
         mutableStateOf(existingEntry?.notes ?: "")
@@ -268,7 +278,7 @@ fun MachineEntrySheet(
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text("المستهدف", fontSize = 10.sp, color = FactoryTextMuted)
                             Text(
-                                if (asset.targetCycleProduction > 0) "${asset.targetCycleProduction.toInt()} كجم" else "غير محدد",
+                                if (asset.targetCycleProduction > 0) "${asset.targetCycleProduction.toInt()} ${asset.targetCycleUnitName.orEmpty()}" else "غير محدد",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp,
                                 color = FactoryGreenDark
@@ -616,17 +626,12 @@ fun MachineEntrySheet(
                     supportingText = { Text("الافتراضي: ${asset.cycleTimeSeconds}ث", fontSize = 10.sp) }
                 )
 
-                OutlinedTextField(
-                    value = targetProductionText,
-                    onValueChange = { targetProductionText = it },
-                    modifier = Modifier.weight(1f),
-                    label = { Text("المستهدف (كجم)") },
-                    placeholder = { Text("${asset.targetCycleProduction}") },
-                    leadingIcon = { Icon(Icons.Outlined.Flag, contentDescription = null, tint = FactoryGreenDark, modifier = Modifier.size(18.dp)) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    shape = RoundedCornerShape(12.dp),
-                    supportingText = { Text("الافتراضي: ${asset.targetCycleProduction.toInt()}كجم", fontSize = 10.sp) }
-                )
+                Surface(modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp), color = FactorySurfaceVariant) {
+                    Column(Modifier.padding(12.dp)) {
+                        Text("مستهدف الدورة (ثابت)", fontSize = 11.sp, color = FactoryTextMuted)
+                        Text("${asset.targetCycleProduction} ${asset.targetCycleUnitName.orEmpty()}", fontWeight = FontWeight.Bold, color = FactoryGreenDark)
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(14.dp))
@@ -702,14 +707,7 @@ fun MachineEntrySheet(
             // ==========================================
             // 5. الخامة والوزن والعبوة والملاحظات
             // ==========================================
-            OutlinedTextField(
-                value = rawMaterial,
-                onValueChange = { rawMaterial = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("الخامة المستخدمة (مثل: PP سابك)") },
-                leadingIcon = { Icon(Icons.Outlined.Science, contentDescription = null, tint = FactoryNavy) },
-                shape = RoundedCornerShape(12.dp)
-            )
+            if (materialOptions.isNotEmpty()) ProductionOptionSelector("الخامة", materialOptions, selectedMaterial, { selectedMaterial = it }, noneLabel = "بدون تحديد")
 
             Spacer(modifier = Modifier.height(12.dp))
 
@@ -717,8 +715,8 @@ fun MachineEntrySheet(
                 value = weightText,
                 onValueChange = { weightText = it },
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("وزن الإنتاج النهائي (بالكيلو) *") },
-                placeholder = { Text("مثال: 350.5") },
+                label = { Text("كمية الإنتاج النهائية *") },
+                placeholder = { Text("أدخل الكمية") },
                 leadingIcon = { Icon(Icons.Outlined.Scale, contentDescription = null, tint = FactoryGreenDark) },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 shape = RoundedCornerShape(12.dp)
@@ -726,14 +724,9 @@ fun MachineEntrySheet(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            OutlinedTextField(
-                value = packagingType,
-                onValueChange = { packagingType = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("نوع العبوة (كراتين، شكاير، براميل...)") },
-                leadingIcon = { Icon(Icons.Outlined.AllInbox, contentDescription = null, tint = FactoryNavy) },
-                shape = RoundedCornerShape(12.dp)
-            )
+            if (finalUnits.isNotEmpty()) ProductionOptionSelector("وحدة كمية الإنتاج", finalUnits, selectedUnit, { selectedUnit = it }, allowNone = false)
+
+            if (packagingOptions.isNotEmpty()) ProductionOptionSelector("العبوة", packagingOptions, selectedPackaging, { selectedPackaging = it }, noneLabel = "بدون تحديد")
 
             Spacer(modifier = Modifier.height(12.dp))
 
@@ -755,8 +748,11 @@ fun MachineEntrySheet(
                     val currentCavities = currentCavitiesText.toIntOrNull() ?: asset.originalCavities
                     val actualCooling = coolingTimeText.toDoubleOrNull() ?: asset.coolingTimeSeconds
                     val actualCycle = cycleTimeText.toDoubleOrNull() ?: asset.cycleTimeSeconds
-                    val actualTarget = targetProductionText.toDoubleOrNull() ?: asset.targetCycleProduction
                     val weight = weightText.toDoubleOrNull() ?: 0.0
+                    val unit = selectedUnit
+                    val kgFactor = unit?.kgPerUnit
+                    val finalKg = if (kgFactor != null) weight * kgFactor
+                        else if (unit?.name in setOf("كجم", "كيلو", "كيلوجرام")) weight else 0.0
 
                     val entry = MachineEntryEntity(
                         id = existingEntry?.id ?: 0,
@@ -778,10 +774,16 @@ fun MachineEntrySheet(
                         operationMode = operationMode,
                         coolingTimeSeconds = actualCooling,
                         cycleTimeSeconds = actualCycle,
-                        rawMaterial = rawMaterial,
-                        finalProductionWeightKg = weight,
-                        targetCycleProduction = actualTarget,
-                        packagingType = packagingType,
+                        rawMaterial = selectedMaterial?.name ?: "",
+                        rawMaterialOptionId = selectedMaterial?.id,
+                        finalProductionWeightKg = finalKg,
+                        finalProductionQuantity = weight,
+                        finalProductionUnitId = unit?.id,
+                        finalProductionUnitName = unit?.name ?: "كجم",
+                        targetCycleProduction = asset.targetCycleProduction,
+                        targetCycleUnitName = asset.targetCycleUnitName.orEmpty(),
+                        packagingType = selectedPackaging?.name ?: "",
+                        packagingOptionId = selectedPackaging?.id,
                         notes = notes
                     )
                     onSave(entry)
@@ -847,7 +849,6 @@ private fun OperatorPickerDialog(
     onSelect: (String, OperatorEntity?) -> Unit
 ) {
     var searchQuery by remember { mutableStateOf("") }
-    var customName by remember { mutableStateOf("") }
 
     val filtered = remember(searchQuery, operators) {
         if (searchQuery.isBlank()) operators
@@ -911,6 +912,11 @@ private fun OperatorPickerDialog(
                         .heightIn(max = 340.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    item {
+                        Surface(modifier = Modifier.fillMaxWidth().clickable { onSelect("", null) }, shape = RoundedCornerShape(10.dp), color = FactorySurfaceVariant) {
+                            Text("بدون تحديد (اختياري)", Modifier.padding(13.dp), color = FactoryTextSecondary, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
                     // Option: Default Dashboard Operator
                     if (defaultOperatorName.isNotBlank() && searchQuery.isBlank()) {
                         item {
@@ -1006,38 +1012,6 @@ private fun OperatorPickerDialog(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
-                HorizontalDivider()
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Manual Name Entry Option
-                Text("أو إدخال اسم عامل يدوي:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = FactoryDark)
-                Spacer(modifier = Modifier.height(4.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedTextField(
-                        value = customName,
-                        onValueChange = { customName = it },
-                        modifier = Modifier.weight(1f),
-                        placeholder = { Text("اكتب اسم العامل هنا...") },
-                        singleLine = true,
-                        shape = RoundedCornerShape(8.dp)
-                    )
-                    Button(
-                        onClick = {
-                            if (customName.trim().isNotBlank()) {
-                                onSelect(customName.trim(), null)
-                            }
-                        },
-                        enabled = customName.trim().isNotBlank(),
-                        shape = RoundedCornerShape(8.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = FactoryNavy)
-                    ) {
-                        Text("تأكيد")
-                    }
-                }
             }
         },
         confirmButton = {}
@@ -1056,7 +1030,6 @@ private fun ProductPickerDialog(
     onSelect: (String, ProductEntity?) -> Unit
 ) {
     var searchQuery by remember { mutableStateOf("") }
-    var customName by remember { mutableStateOf("") }
 
     val filtered = remember(searchQuery, products) {
         if (searchQuery.isBlank()) products
@@ -1120,6 +1093,11 @@ private fun ProductPickerDialog(
                         .heightIn(max = 340.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    item {
+                        Surface(modifier = Modifier.fillMaxWidth().clickable { onSelect("", null) }, shape = RoundedCornerShape(10.dp), color = FactorySurfaceVariant) {
+                            Text("بدون تحديد (اختياري)", Modifier.padding(13.dp), color = FactoryTextSecondary, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
                     // Option: Default Dashboard Product
                     if (defaultProductName.isNotBlank() && searchQuery.isBlank()) {
                         item {
@@ -1237,38 +1215,6 @@ private fun ProductPickerDialog(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
-                HorizontalDivider()
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Manual Product Entry Option
-                Text("أو إدخال اسم منتج يدوي:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = FactoryDark)
-                Spacer(modifier = Modifier.height(4.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedTextField(
-                        value = customName,
-                        onValueChange = { customName = it },
-                        modifier = Modifier.weight(1f),
-                        placeholder = { Text("اكتب اسم المنتج هنا...") },
-                        singleLine = true,
-                        shape = RoundedCornerShape(8.dp)
-                    )
-                    Button(
-                        onClick = {
-                            if (customName.trim().isNotBlank()) {
-                                onSelect(customName.trim(), null)
-                            }
-                        },
-                        enabled = customName.trim().isNotBlank(),
-                        shape = RoundedCornerShape(8.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = FactoryNavy)
-                    ) {
-                        Text("تأكيد")
-                    }
-                }
             }
         },
         confirmButton = {}

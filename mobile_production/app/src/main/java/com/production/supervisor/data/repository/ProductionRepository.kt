@@ -21,6 +21,7 @@ class ProductionRepository @Inject constructor(
     fun getAssetsFlow(): Flow<List<AssetEntity>> = dao.getAssetsFlow()
     fun getProductsFlow(): Flow<List<ProductEntity>> = dao.getProductsFlow()
     fun getOperatorsFlow(): Flow<List<OperatorEntity>> = dao.getOperatorsFlow()
+    fun getProductionOptionsFlow(): Flow<List<ProductionOptionEntity>> = dao.getProductionOptionsFlow()
     fun getEntriesFlow(reportId: String): Flow<List<MachineEntryEntity>> = dao.getEntriesForReportFlow(reportId)
     fun getStoppagesFlow(reportId: String): Flow<List<StoppageEntity>> = dao.getStoppagesForReportFlow(reportId)
     fun getShiftReportFlow(reportId: String): Flow<ShiftReportEntity?> = dao.getShiftReportFlow(reportId)
@@ -59,6 +60,14 @@ class ProductionRepository @Inject constructor(
                         defaultProductName = resolvedProdName,
                         defaultOperatorId = defaultOpId,
                         defaultOperatorName = resolvedOpName,
+                        defaultRawMaterialId = dto.productionDefault?.defaultRawMaterial,
+                        defaultRawMaterialName = dto.productionDefault?.defaultRawMaterialName,
+                        defaultFinalUnitId = dto.productionDefault?.defaultFinalUnit,
+                        defaultFinalUnitName = dto.productionDefault?.defaultFinalUnitName,
+                        targetCycleUnitId = dto.productionDefault?.targetCycleUnit,
+                        targetCycleUnitName = dto.productionDefault?.targetCycleUnitName,
+                        defaultPackagingId = dto.productionDefault?.defaultPackaging,
+                        defaultPackagingName = dto.productionDefault?.defaultPackagingName,
                         originalCavities = dto.productionDefault?.originalCavities ?: 1,
                         coolingTimeSeconds = dto.productionDefault?.coolingTimeSeconds ?: 0.0,
                         cycleTimeSeconds = dto.productionDefault?.cycleTimeSeconds ?: 0.0,
@@ -93,6 +102,12 @@ class ProductionRepository @Inject constructor(
                 }
                 dao.deleteAllOperators()
                 dao.insertOperators(operatorEntities)
+
+                val optionEntities = data.productionOptions.map { dto ->
+                    ProductionOptionEntity(dto.id, dto.category, dto.name, dto.kgPerUnit)
+                }
+                dao.deleteAllProductionOptions()
+                dao.insertProductionOptions(optionEntities)
 
                 Result.success(data)
             } else {
@@ -228,9 +243,13 @@ class ProductionRepository @Inject constructor(
                         coolingTimeSeconds = it.coolingTimeSeconds,
                         cycleTimeSeconds = it.cycleTimeSeconds,
                         rawMaterial = it.rawMaterial,
+                        rawMaterialOptionId = it.rawMaterialOptionId,
                         finalProductionWeightKg = it.finalProductionWeightKg,
+                        finalProductionQuantity = it.finalProductionQuantity,
+                        finalProductionUnitId = it.finalProductionUnitId,
                         targetCycleProduction = it.targetCycleProduction,
                         packagingType = it.packagingType,
+                        packagingOptionId = it.packagingOptionId,
                         notes = it.notes
                     )
                 },

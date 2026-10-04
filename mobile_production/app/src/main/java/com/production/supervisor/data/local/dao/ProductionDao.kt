@@ -43,6 +43,15 @@ interface ProductionDao {
     @Query("DELETE FROM operators")
     suspend fun deleteAllOperators()
 
+    @Query("SELECT * FROM production_options ORDER BY category ASC, name ASC")
+    fun getProductionOptionsFlow(): Flow<List<ProductionOptionEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertProductionOptions(options: List<ProductionOptionEntity>)
+
+    @Query("DELETE FROM production_options")
+    suspend fun deleteAllProductionOptions()
+
     @Query("SELECT * FROM shift_reports WHERE clientReportId = :reportId")
     fun getShiftReportFlow(reportId: String): Flow<ShiftReportEntity?>
 

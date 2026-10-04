@@ -22,7 +22,7 @@ object DatabaseModule {
             context,
             ProductionDatabase::class.java,
             "production_supervisor.db"
-        ).fallbackToDestructiveMigration().build()
+        ).addMigrations(ProductionDatabase.MIGRATION_3_4).build()
     }
 
     @Provides
