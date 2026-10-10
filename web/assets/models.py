@@ -7,10 +7,6 @@ class Asset(models.Model):
         REGULAR_MACHINE = "REGULAR_MACHINE", "ماكينة حقن"
         PRESS = "PRESS", "مكبس"
         SPRING_MACHINE = "SPRING_MACHINE", "ماكينة نفخ"
-        EXTRUDER = "EXTRUDER", "ماكينة سحب / إكسترودر"
-        PRINTING = "PRINTING", "ماكينة طباعة"
-        PACKAGING = "PACKAGING", "ماكينة تغليف / تعبئة"
-        CRUSHER = "CRUSHER", "كسارة / مطحنة"
         OTHER = "OTHER", "نوع آخر / مخصص"
 
     factory = models.ForeignKey("factories.Factory", on_delete=models.PROTECT, related_name="assets")
