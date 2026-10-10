@@ -17,11 +17,14 @@ data class User(
     val displayName: String get() = name.ifBlank { phone }
 }
 data class Asset(val id: Int, val code: String, val name: String, val typeName: String, val sequence: Int) {
+    val effectiveName: String
+        get() = name.ifBlank { code }
+
     val normalizedTypeName: String
         get() = normalizeAssetTypeName(typeName.ifBlank { name })
 
     val maintenanceTitle: String
-        get() = formatMaintenanceTitle(normalizedTypeName, code)
+        get() = formatMaintenanceTitle(normalizedTypeName, effectiveName)
 }
 
 fun normalizeAssetTypeName(raw: String): String {
@@ -39,6 +42,10 @@ fun normalizeAssetTypeName(raw: String): String {
 
 fun formatMaintenanceTitle(normalizedType: String, code: String): String {
     val cleanCode = code.trim()
+    if (cleanCode.startsWith("الصيانة الدورية")) return cleanCode
+    if (cleanCode.startsWith("مكبس") || cleanCode.startsWith("ماكينة") || cleanCode.startsWith("خط")) {
+        return "الصيانة الدورية ل$cleanCode"
+    }
     return when {
         normalizedType.contains("مكبس") -> "الصيانة الدورية لمكبس $cleanCode"
         normalizedType.startsWith("ماكينة") -> "الصيانة الدورية ل$normalizedType $cleanCode"

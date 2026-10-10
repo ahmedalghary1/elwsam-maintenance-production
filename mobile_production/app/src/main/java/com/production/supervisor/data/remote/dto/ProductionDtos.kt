@@ -68,6 +68,9 @@ data class ProductionOptionDto(
 data class ProductionAssetDto(
     val id: Int,
     @SerialName("asset_code") val assetCode: String,
+    @SerialName("name") val name: String = "",
+    @SerialName("display_name") val displayName: String = "",
+    @SerialName("custom_type_name") val customTypeName: String = "",
     @SerialName("asset_type") val assetType: String,
     @SerialName("asset_type_display") val assetTypeDisplay: String,
     @SerialName("sequence_order") val sequenceOrder: Int = 1,

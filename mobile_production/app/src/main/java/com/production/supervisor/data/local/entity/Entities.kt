@@ -40,14 +40,16 @@ data class AssetEntity(
             if (maintenanceTitle.isNotBlank() && !maintenanceTitle.contains("الصيانة الدورية")) {
                 return maintenanceTitle
             }
-            val typeLabel = if (assetType.contains("BLOW", ignoreCase = true) || assetType.contains("SPRING", ignoreCase = true)) {
+            val typeLabel = if (assetTypeDisplay.isNotBlank()) {
+                assetTypeDisplay
+            } else if (assetType.contains("BLOW", ignoreCase = true) || assetType.contains("SPRING", ignoreCase = true)) {
                 "ماكينة نفخ"
             } else if (assetType.contains("PRESS", ignoreCase = true)) {
                 "مكبس"
             } else {
-                "ماكينة حقن"
+                "ماكينة"
             }
-            return "إنتاج $typeLabel $assetCode"
+            return if (assetCode.startsWith(typeLabel)) assetCode else "$typeLabel $assetCode"
         }
 }
 
