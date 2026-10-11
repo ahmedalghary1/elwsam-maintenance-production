@@ -104,7 +104,7 @@ fun ProductionHomeScreen(
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                         modifier = Modifier.height(34.dp)
                     ) {
-                        Text("تسجيل مبسط", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        Text("تسجيل مبسط", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     }
                     IconButton(onClick = { viewModel.loadData() }) {
                         Icon(Icons.Default.Refresh, contentDescription = "تحديث", tint = Color.White)

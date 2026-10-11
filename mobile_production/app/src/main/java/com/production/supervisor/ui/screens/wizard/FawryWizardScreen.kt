@@ -230,10 +230,22 @@ private fun WelcomeView(uiState: ProductionHomeUiState, onStart: () -> Unit, onR
                 uiState.currentUser?.name?.takeIf { it.isNotBlank() }?.let { Text("المشرف: $it", color = FactoryTextSecondary) }
                 Text("اكتب كمية إنتاج الماكينة ثم اضغط حفظ والتالي. إعدادات الماكينة جاهزة تلقائياً.", fontSize = 18.sp, color = FactoryTextSecondary)
                 Text("$count من ${uiState.assets.size} ماكينة مسجلة", fontSize = 18.sp, fontWeight = FontWeight.Medium)
-                Button(onClick = if (uiState.isReportFinished) onReview else onStart,
+                Button(
+                    onClick = if (uiState.isReportFinished) onReview else onStart,
                     enabled = uiState.assets.isNotEmpty() && !uiState.isLoading,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 62.dp), shape = RoundedCornerShape(12.dp)) {
-                    Text(if (uiState.isReportFinished) "عرض التقرير" else if (count > 0) "استكمال التقرير" else "بدء التقرير", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 62.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = FactoryNavy,
+                        contentColor = Color.White
+                    )
+                ) {
+                    Text(
+                        if (uiState.isReportFinished) "عرض التقرير" else if (count > 0) "استكمال التقرير" else "بدء التقرير",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
                 }
                 if (count > 0 && !uiState.isReportFinished) OutlinedButton(onClick = onReview, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) { Text("مراجعة الماكينات المسجلة", fontSize = 17.sp) }
             }
@@ -365,9 +377,30 @@ private fun SaveFooter(label: String, enabled: Boolean, saving: Boolean, onSave:
     Surface(color = FactorySurface, shadowElevation = 4.dp) {
         Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
             if (onPrevious != null && previousEnabled) OutlinedButton(onClick = onPrevious, modifier = Modifier.heightIn(min = 58.dp), shape = RoundedCornerShape(12.dp)) { Text("السابق", fontSize = 16.sp) }
-            Button(onClick = onSave, enabled = enabled, modifier = Modifier.weight(1f).heightIn(min = 58.dp), shape = RoundedCornerShape(12.dp)) {
-                if (saving) { CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp); Spacer(Modifier.width(10.dp)) }
-                Text(if (saving) "جاري الحفظ" else label, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+            Button(
+                onClick = onSave,
+                enabled = enabled,
+                modifier = Modifier.weight(1f).heightIn(min = 58.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = FactoryNavy,
+                    contentColor = Color.White
+                )
+            ) {
+                if (saving) {
+                    CircularProgressIndicator(
+                        Modifier.size(22.dp),
+                        strokeWidth = 2.dp,
+                        color = Color.White
+                    )
+                    Spacer(Modifier.width(10.dp))
+                }
+                Text(
+                    if (saving) "جاري الحفظ" else label,
+                    fontSize = 19.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
             }
         }
     }
