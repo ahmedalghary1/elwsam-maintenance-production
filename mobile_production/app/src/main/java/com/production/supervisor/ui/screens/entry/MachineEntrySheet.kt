@@ -37,6 +37,17 @@ import com.production.supervisor.data.local.entity.ProductionOptionEntity
 import com.production.supervisor.ui.components.ProductionOptionSelector
 import com.production.supervisor.ui.theme.*
 
+private fun normalizeEntryNumber(value: String): String = buildString {
+    value.forEach { char ->
+        when {
+            char in '0'..'9' -> append(char)
+            char in '٠'..'٩' -> append('0' + (char - '٠'))
+            char in '۰'..'۹' -> append('0' + (char - '۰'))
+            char in listOf('.', '٫', ',') -> append('.')
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MachineEntrySheet(
@@ -47,18 +58,18 @@ fun MachineEntrySheet(
     products: List<ProductEntity>,
     productionOptions: List<ProductionOptionEntity>,
     onDismiss: () -> Unit,
-    onSave: (MachineEntryEntity) -> Unit
+    onSave: (MachineEntryEntity) -> Unit,
+    isSaving: Boolean = false
 ) {
     // 1. Initial values for Operator
     val defaultOp = operators.find { it.id == asset.defaultOperatorId }
-    val initialOperatorName = existingEntry?.operatorName?.ifBlank { null }
-        ?: asset.defaultOperatorName?.takeIf { it.isNotBlank() }
+    val initialOperatorName = if (existingEntry != null) existingEntry.operatorName else asset.defaultOperatorName?.takeIf { it.isNotBlank() }
         ?: defaultOp?.name
         ?: ""
 
     var operatorNameText by remember(asset.id, existingEntry?.id) { mutableStateOf(initialOperatorName) }
     var selectedOperator by remember(asset.id, existingEntry?.id) {
-        mutableStateOf(operators.find { it.name == initialOperatorName } ?: defaultOp)
+        mutableStateOf(operators.find { it.name == initialOperatorName } ?: defaultOp.takeIf { existingEntry == null })
     }
 
     val originalOperatorDisplayName = asset.defaultOperatorName?.takeIf { it.isNotBlank() }
@@ -72,14 +83,13 @@ fun MachineEntrySheet(
 
     // 2. Initial values for Product
     val defaultProd = products.find { it.id == asset.defaultProductId }
-    val initialProductName = existingEntry?.productName?.ifBlank { null }
-        ?: asset.defaultProductName?.takeIf { it.isNotBlank() }
+    val initialProductName = if (existingEntry != null) existingEntry.productName else asset.defaultProductName?.takeIf { it.isNotBlank() }
         ?: defaultProd?.name
         ?: ""
 
     var productNameText by remember(asset.id, existingEntry?.id) { mutableStateOf(initialProductName) }
     var selectedProduct by remember(asset.id, existingEntry?.id) {
-        mutableStateOf(products.find { it.name == initialProductName } ?: defaultProd)
+        mutableStateOf(products.find { it.name == initialProductName } ?: defaultProd.takeIf { existingEntry == null })
     }
 
     val originalProductDisplayName = asset.defaultProductName?.takeIf { it.isNotBlank() }
@@ -98,20 +108,21 @@ fun MachineEntrySheet(
                 ?: asset.originalCavities.toString()
         )
     }
+    var originalCavitiesText by remember(asset.id, existingEntry?.id) {
+        mutableStateOf((existingEntry?.originalCavities ?: asset.originalCavities).toString())
+    }
+    val originalCooling = existingEntry?.originalCoolingTimeSeconds ?: asset.coolingTimeSeconds
+    val originalCycle = existingEntry?.originalCycleTimeSeconds ?: asset.cycleTimeSeconds
 
     var coolingTimeText by remember(asset.id, existingEntry?.id) {
         mutableStateOf(
-            existingEntry?.coolingTimeSeconds?.takeIf { it > 0 }?.toString()
-                ?: asset.coolingTimeSeconds.takeIf { it > 0 }?.toString()
-                ?: ""
+            (existingEntry?.coolingTimeSeconds ?: asset.coolingTimeSeconds).toString()
         )
     }
 
     var cycleTimeText by remember(asset.id, existingEntry?.id) {
         mutableStateOf(
-            existingEntry?.cycleTimeSeconds?.takeIf { it > 0 }?.toString()
-                ?: asset.cycleTimeSeconds.takeIf { it > 0 }?.toString()
-                ?: ""
+            (existingEntry?.cycleTimeSeconds ?: asset.cycleTimeSeconds).toString()
         )
     }
 
@@ -150,9 +161,14 @@ fun MachineEntrySheet(
     // Picker Dialog States
     var showOperatorDialog by remember { mutableStateOf(false) }
     var showProductDialog by remember { mutableStateOf(false) }
+    val validInputs = currentCavitiesText.toIntOrNull()?.let { it > 0 } == true &&
+        originalCavitiesText.toIntOrNull()?.let { it > 0 } == true &&
+        coolingTimeText.toDoubleOrNull()?.let { it.isFinite() && it >= 0 } == true &&
+        cycleTimeText.toDoubleOrNull()?.let { it.isFinite() && it >= 0 } == true &&
+        weightText.toDoubleOrNull()?.let { it.isFinite() && it > 0 } == true
 
     ModalBottomSheet(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!isSaving) onDismiss() },
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = FactorySurface,
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
@@ -230,7 +246,7 @@ fun MachineEntrySheet(
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "بيانات الماكينة المعتمدة بالداشبورد (المرجع)",
+                            text = "إعدادات الماكينة الافتراضية",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 12.sp,
                                 color = FactoryNavy
@@ -367,7 +383,7 @@ fun MachineEntrySheet(
                             )
                             if (operatorNameText.trim() == originalOperatorDisplayName.trim() && originalOperatorDisplayName.isNotBlank()) {
                                 Text(
-                                    text = "الافتراضي بالداشبورد ⭐",
+                                    text = "القيمة الافتراضية",
                                     fontSize = 11.sp,
                                     color = FactoryGreenDark,
                                     fontWeight = FontWeight.SemiBold
@@ -411,7 +427,7 @@ fun MachineEntrySheet(
                         Icon(Icons.Outlined.Warning, contentDescription = null, tint = FactoryOrangeDark, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "⚠️ تم تغيير القائم على الماكينة!\nكانت القيمة: $originalOperatorDisplayName ➔ وتم تغييرها إلى: ${operatorNameText.trim()}",
+                            text = "العامل الحالي: ${operatorNameText.trim()}\nالعامل الافتراضي: $originalOperatorDisplayName",
                             color = FactoryOrangeDark,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
@@ -499,7 +515,7 @@ fun MachineEntrySheet(
                             )
                             if (productNameText.trim() == originalProductDisplayName.trim() && originalProductDisplayName.isNotBlank()) {
                                 Text(
-                                    text = "الافتراضي بالداشبورد ⭐",
+                                    text = "القيمة الافتراضية",
                                     fontSize = 11.sp,
                                     color = FactoryGreenDark,
                                     fontWeight = FontWeight.SemiBold
@@ -549,7 +565,7 @@ fun MachineEntrySheet(
                         Icon(Icons.Outlined.Warning, contentDescription = null, tint = FactoryOrangeDark, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "⚠️ تم تغيير المنتج عن المعتاد!\nكانت القيمة: $originalProductDisplayName ➔ وتم تغييرها إلى: ${productNameText.trim()}",
+                            text = "المنتج الحالي: ${productNameText.trim()}\nالمنتج الافتراضي: $originalProductDisplayName",
                             color = FactoryOrangeDark,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
@@ -584,30 +600,42 @@ fun MachineEntrySheet(
             ) {
                 OutlinedTextField(
                     value = currentCavitiesText,
-                    onValueChange = { currentCavitiesText = it },
+                    onValueChange = { currentCavitiesText = normalizeEntryNumber(it).filter(Char::isDigit) },
                     modifier = Modifier.weight(1f),
-                    label = { Text("اللقم الفعلي") },
+                    label = { Text("اللقم الحالية") },
                     placeholder = { Text("${asset.originalCavities}") },
                     leadingIcon = { Icon(Icons.Outlined.GridOn, contentDescription = null, tint = FactoryNavy, modifier = Modifier.size(18.dp)) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     shape = RoundedCornerShape(12.dp),
-                    supportingText = { Text("الافتراضي: ${asset.originalCavities}", fontSize = 10.sp) }
+                    supportingText = { Text("الافتراضي: ${asset.originalCavities}", fontSize = 12.sp) },
+                    isError = currentCavitiesText.toIntOrNull()?.let { it > 0 } != true
                 )
 
                 OutlinedTextField(
                     value = coolingTimeText,
-                    onValueChange = { coolingTimeText = it },
+                    onValueChange = { coolingTimeText = normalizeEntryNumber(it) },
                     modifier = Modifier.weight(1f),
                     label = { Text("التبريد الفعلي (ث)") },
                     placeholder = { Text("${asset.coolingTimeSeconds}") },
                     leadingIcon = { Icon(Icons.Outlined.AcUnit, contentDescription = null, tint = FactoryNavy, modifier = Modifier.size(18.dp)) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     shape = RoundedCornerShape(12.dp),
-                    supportingText = { Text("الافتراضي: ${asset.coolingTimeSeconds}ث", fontSize = 10.sp) }
+                    supportingText = { Text("الأصلي: ${originalCooling}ث", fontSize = 12.sp) },
+                    isError = coolingTimeText.toDoubleOrNull()?.let { it.isFinite() && it >= 0 } != true
                 )
             }
 
             Spacer(modifier = Modifier.height(6.dp))
+
+            OutlinedTextField(
+                value = originalCavitiesText,
+                onValueChange = { originalCavitiesText = normalizeEntryNumber(it).filter(Char::isDigit) },
+                modifier = Modifier.fillMaxWidth(), label = { Text("اللقم الأصلية") },
+                supportingText = { Text("القيمة الافتراضية للماكينة: ${asset.originalCavities}") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                shape = RoundedCornerShape(12.dp), singleLine = true,
+                isError = originalCavitiesText.toIntOrNull()?.let { it > 0 } != true
+            )
 
             // الصف الثاني: الدورة الفعلية والمستهدف الفعلي
             Row(
@@ -616,14 +644,15 @@ fun MachineEntrySheet(
             ) {
                 OutlinedTextField(
                     value = cycleTimeText,
-                    onValueChange = { cycleTimeText = it },
+                    onValueChange = { cycleTimeText = normalizeEntryNumber(it) },
                     modifier = Modifier.weight(1f),
                     label = { Text("الدورة الفعلية (ث)") },
                     placeholder = { Text("${asset.cycleTimeSeconds}") },
                     leadingIcon = { Icon(Icons.Outlined.Speed, contentDescription = null, tint = FactoryNavy, modifier = Modifier.size(18.dp)) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     shape = RoundedCornerShape(12.dp),
-                    supportingText = { Text("الافتراضي: ${asset.cycleTimeSeconds}ث", fontSize = 10.sp) }
+                    supportingText = { Text("الأصلي: ${originalCycle}ث", fontSize = 12.sp) },
+                    isError = cycleTimeText.toDoubleOrNull()?.let { it.isFinite() && it >= 0 } != true
                 )
 
                 Surface(modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp), color = FactorySurfaceVariant) {
@@ -634,6 +663,14 @@ fun MachineEntrySheet(
                 }
             }
 
+            TextButton(onClick = {
+                currentCavitiesText = asset.originalCavities.toString()
+                originalCavitiesText = asset.originalCavities.toString()
+                coolingTimeText = originalCooling.toString()
+                cycleTimeText = originalCycle.toString()
+            }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                Text("إعادة اللقم والدورة والتبريد إلى القيم الافتراضية", fontSize = 15.sp)
+            }
             Spacer(modifier = Modifier.height(14.dp))
 
             // ==========================================
@@ -669,8 +706,7 @@ fun MachineEntrySheet(
                         Icon(Icons.Outlined.SmartToy, contentDescription = null, modifier = Modifier.size(20.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Column(horizontalAlignment = Alignment.Start) {
-                            Text("أوتو", fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                            Text("AUTO", fontSize = 10.sp, fontWeight = FontWeight.Medium)
+                            Text("تلقائي", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -696,7 +732,6 @@ fun MachineEntrySheet(
                         Spacer(modifier = Modifier.width(8.dp))
                         Column(horizontalAlignment = Alignment.Start) {
                             Text("يدوي", fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                            Text("MANUAL", fontSize = 10.sp, fontWeight = FontWeight.Medium)
                         }
                     }
                 }
@@ -713,13 +748,14 @@ fun MachineEntrySheet(
 
             OutlinedTextField(
                 value = weightText,
-                onValueChange = { weightText = it },
+                onValueChange = { weightText = normalizeEntryNumber(it) },
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("كمية الإنتاج النهائية *") },
                 placeholder = { Text("أدخل الكمية") },
                 leadingIcon = { Icon(Icons.Outlined.Scale, contentDescription = null, tint = FactoryGreenDark) },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                shape = RoundedCornerShape(12.dp)
+                shape = RoundedCornerShape(12.dp),
+                isError = weightText.isNotEmpty() && weightText.toDoubleOrNull()?.let { it.isFinite() && it > 0 } != true
             )
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -745,7 +781,7 @@ fun MachineEntrySheet(
             // Save Button
             Button(
                 onClick = {
-                    val currentCavities = currentCavitiesText.toIntOrNull() ?: asset.originalCavities
+                    val currentCavities = currentCavitiesText.toInt()
                     val actualCooling = coolingTimeText.toDoubleOrNull() ?: asset.coolingTimeSeconds
                     val actualCycle = cycleTimeText.toDoubleOrNull() ?: asset.cycleTimeSeconds
                     val weight = weightText.toDoubleOrNull() ?: 0.0
@@ -769,11 +805,13 @@ fun MachineEntrySheet(
                         originalProductId = asset.defaultProductId ?: existingEntry?.originalProductId,
                         originalProductName = originalProductDisplayName,
                         productChanged = isProductChanged,
-                        originalCavities = asset.originalCavities,
+                        originalCavities = originalCavitiesText.toInt(),
                         currentCavities = currentCavities,
                         operationMode = operationMode,
                         coolingTimeSeconds = actualCooling,
                         cycleTimeSeconds = actualCycle,
+                        originalCoolingTimeSeconds = originalCooling,
+                        originalCycleTimeSeconds = originalCycle,
                         rawMaterial = selectedMaterial?.name ?: "",
                         rawMaterialOptionId = selectedMaterial?.id,
                         finalProductionWeightKg = finalKg,
@@ -788,6 +826,7 @@ fun MachineEntrySheet(
                     )
                     onSave(entry)
                 },
+                enabled = validInputs && !isSaving,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(52.dp),
@@ -797,7 +836,7 @@ fun MachineEntrySheet(
             ) {
                 Icon(Icons.Outlined.CheckCircle, contentDescription = null, modifier = Modifier.size(20.dp), tint = Color.White)
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("حفظ بيانات الماكينة", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                Text(if (isSaving) "جاري الحفظ" else "حفظ بيانات الماكينة", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
             }
         }
     }
@@ -941,7 +980,7 @@ private fun OperatorPickerDialog(
                                         Spacer(modifier = Modifier.width(10.dp))
                                         Column {
                                             Text(defaultOperatorName, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = FactoryNavy)
-                                            Text("الافتراضي المعتمد بالداشبورد ⭐", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = FactoryOrangeDark)
+                                            Text("العامل الافتراضي", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = FactoryTextSecondary)
                                         }
                                     }
                                     if (currentSelectedName.trim() == defaultOperatorName.trim()) {
@@ -1122,7 +1161,7 @@ private fun ProductPickerDialog(
                                         Spacer(modifier = Modifier.width(10.dp))
                                         Column {
                                             Text(defaultProductName, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = FactoryNavy)
-                                            Text("المنتج الافتراضي المعتمد بالداشبورد ⭐", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = FactoryOrangeDark)
+                                            Text("المنتج الافتراضي", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = FactoryTextSecondary)
                                         }
                                     }
                                     if (currentSelectedName.trim() == defaultProductName.trim()) {

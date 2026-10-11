@@ -4,6 +4,12 @@ import androidx.room.*
 import com.production.supervisor.data.local.entity.*
 import kotlinx.coroutines.flow.Flow
 
+data class ReportSnapshot(
+    val report: ShiftReportEntity,
+    val entries: List<MachineEntryEntity>,
+    val stoppages: List<StoppageEntity>
+)
+
 @Dao
 interface ProductionDao {
 
@@ -58,8 +64,11 @@ interface ProductionDao {
     @Query("SELECT * FROM shift_reports WHERE clientReportId = :reportId LIMIT 1")
     suspend fun getShiftReport(reportId: String): ShiftReportEntity?
 
-    @Query("SELECT * FROM shift_reports WHERE reportDate = :date AND shift = :shift LIMIT 1")
-    suspend fun findShiftReport(date: String, shift: String): ShiftReportEntity?
+    @Query("SELECT * FROM shift_reports WHERE reportDate = :date AND shift = :shift AND factoryId = :factoryId ORDER BY startedAtDevice DESC LIMIT 1")
+    suspend fun findShiftReport(date: String, shift: String, factoryId: Int): ShiftReportEntity?
+
+    @Query("UPDATE shift_reports SET factoryId = :factoryId WHERE factoryId IS NULL")
+    suspend fun assignLegacyReportFactory(factoryId: Int)
 
     @Query("SELECT * FROM shift_reports WHERE isSynced = 0")
     suspend fun getUnsyncedReports(): List<ShiftReportEntity>
@@ -70,11 +79,109 @@ interface ProductionDao {
     @Update
     suspend fun updateShiftReport(report: ShiftReportEntity)
 
-    @Query("UPDATE shift_reports SET status = :status, generalNotes = :notes, completedAtDevice = :completedAt, isSynced = 0 WHERE clientReportId = :reportId")
+    @Query("DELETE FROM shift_reports WHERE clientReportId = :reportId AND isSynced = 1")
+    suspend fun deleteSyncedReport(reportId: String)
+
+    @Query("UPDATE shift_reports SET status = :status, generalNotes = :notes, completedAtDevice = :completedAt, isSynced = 0, localRevision = localRevision + 1 WHERE clientReportId = :reportId")
     suspend fun markReportFinished(reportId: String, status: String, notes: String, completedAt: String)
 
     @Query("UPDATE shift_reports SET isSynced = :synced, status = :status WHERE clientReportId = :reportId")
     suspend fun updateReportSyncStatus(reportId: String, synced: Boolean, status: String)
+
+    @Query("UPDATE shift_reports SET isSynced = 0, localRevision = localRevision + 1 WHERE clientReportId = :reportId")
+    suspend fun markReportDirty(reportId: String)
+
+    @Query("UPDATE shift_reports SET isSynced = 1, status = :status WHERE clientReportId = :reportId AND localRevision = :revision")
+    suspend fun markSnapshotSynced(reportId: String, revision: Long, status: String): Int
+
+    @Transaction
+    suspend fun getReportSnapshot(reportId: String): ReportSnapshot? {
+        val report = getShiftReport(reportId) ?: return null
+        return ReportSnapshot(report, getEntriesForReport(reportId), getStoppagesForReport(reportId))
+    }
+
+    @Transaction
+    suspend fun getOrInsertShiftReport(report: ShiftReportEntity): ShiftReportEntity {
+        return findShiftReport(report.reportDate, report.shift, requireNotNull(report.factoryId))
+            ?: report.also { upsertShiftReport(it) }
+    }
+
+    suspend fun requireEditableReport(reportId: String): ShiftReportEntity {
+        val report = getShiftReport(reportId)
+            ?: throw IllegalStateException("التقرير غير موجود. أعد فتح الوردية.")
+        check(report.completedAtDevice == null && report.status != "CONFIRMED") {
+            "تم إنهاء هذا التقرير ولا يمكن تعديله."
+        }
+        return report
+    }
+
+    @Transaction
+    suspend fun saveEntryLocally(entry: MachineEntryEntity) {
+        requireEditableReport(entry.clientReportId)
+        upsertMachineEntry(entry)
+        markReportDirty(entry.clientReportId)
+    }
+
+    @Transaction
+    suspend fun saveStoppageLocally(stoppage: StoppageEntity) {
+        requireEditableReport(stoppage.clientReportId)
+        insertStoppage(stoppage)
+        markReportDirty(stoppage.clientReportId)
+    }
+
+    @Transaction
+    suspend fun saveStoppedMachineLocally(entry: MachineEntryEntity, stoppage: StoppageEntity) {
+        require(entry.clientReportId == stoppage.clientReportId && entry.assetId == stoppage.assetId)
+        requireEditableReport(entry.clientReportId)
+        upsertMachineEntry(entry)
+        insertStoppage(stoppage)
+        markReportDirty(entry.clientReportId)
+    }
+
+    @Transaction
+    suspend fun finishReportLocally(reportId: String, notes: String, completedAt: String) {
+        val report = getShiftReport(reportId)
+            ?: throw IllegalStateException("التقرير غير موجود. أعد فتح الوردية.")
+        if (report.completedAtDevice != null || report.status == "CONFIRMED") return
+        check(getEntriesForReport(reportId).isNotEmpty()) { "سجّل الماكينات قبل إنهاء التقرير." }
+        markReportFinished(reportId, "PENDING_HANDOVER", notes, completedAt)
+    }
+
+    @Transaction
+    suspend fun replaceBootstrapCache(
+        assets: List<AssetEntity>,
+        products: List<ProductEntity>,
+        operators: List<OperatorEntity>,
+        options: List<ProductionOptionEntity>
+    ) {
+        deleteAllAssets()
+        insertAssets(assets)
+        deleteAllProducts()
+        insertProducts(products)
+        deleteAllOperators()
+        insertOperators(operators)
+        deleteAllProductionOptions()
+        insertProductionOptions(options)
+    }
+
+    @Transaction
+    suspend fun restoreServerReports(reports: List<ReportSnapshot>) {
+        reports.forEach { remote ->
+            val local = findShiftReport(remote.report.reportDate, remote.report.shift, requireNotNull(remote.report.factoryId))
+            val sameIdLocal = getShiftReport(remote.report.clientReportId)
+            if (local?.isSynced == false || sameIdLocal?.isSynced == false) return@forEach
+            if (local != null && local.clientReportId != remote.report.clientReportId) {
+                deleteEntriesForReport(local.clientReportId)
+                deleteStoppagesForReport(local.clientReportId)
+                deleteSyncedReport(local.clientReportId)
+            }
+            upsertShiftReport(remote.report)
+            deleteEntriesForReport(remote.report.clientReportId)
+            deleteStoppagesForReport(remote.report.clientReportId)
+            remote.entries.forEach { upsertMachineEntry(it.copy(id = 0)) }
+            remote.stoppages.forEach { insertStoppage(it.copy(id = 0)) }
+        }
+    }
 
     @Query("SELECT * FROM machine_entries WHERE clientReportId = :reportId ORDER BY assetId ASC")
     fun getEntriesForReportFlow(reportId: String): Flow<List<MachineEntryEntity>>

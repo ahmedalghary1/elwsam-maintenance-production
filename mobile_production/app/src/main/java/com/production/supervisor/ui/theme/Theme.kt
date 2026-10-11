@@ -15,7 +15,7 @@ import androidx.compose.ui.unit.sp
 val FactoryDark = Color(0xFF0F172A)          // Slate 900
 val FactoryNavy = Color(0xFF1E293B)          // Slate 800 (Top bar, primary buttons)
 val FactoryNavyLight = Color(0xFF334155)     // Slate 700
-val FactoryPrimaryBlue = Color(0xFF2563EB)   // Cobalt 600
+val FactoryPrimaryBlue = Color(0xFF275C82)
 
 // Status & Action Accents (Warm, Ergonomic, Eye-Friendly)
 val FactoryOrange = Color(0xFFD97706)        // Amber 600 (Stoppages & alerts - warm, avoids eye strain)
@@ -42,7 +42,7 @@ val FactoryCardBorderHover = Color(0xFFCBD5E1)// Slate 300
 // High Readability Typography Tones
 val FactoryTextPrimary = Color(0xFF0F172A)   // Slate 900
 val FactoryTextSecondary = Color(0xFF475569) // Slate 600
-val FactoryTextMuted = Color(0xFF64748B)     // Slate 500
+val FactoryTextMuted = Color(0xFF526174)
 
 private val LightColorScheme = lightColorScheme(
     primary = FactoryNavy,
@@ -88,22 +88,22 @@ val Typography = Typography(
     ),
     titleMedium = TextStyle(
         fontWeight = FontWeight.Medium,
-        fontSize = 15.sp,
+        fontSize = 17.sp,
         color = FactoryTextPrimary
     ),
     bodyLarge = TextStyle(
         fontWeight = FontWeight.Normal,
-        fontSize = 15.sp,
+        fontSize = 17.sp,
         color = FactoryTextPrimary
     ),
     bodyMedium = TextStyle(
         fontWeight = FontWeight.Normal,
-        fontSize = 13.sp,
+        fontSize = 16.sp,
         color = FactoryTextMuted
     ),
     labelLarge = TextStyle(
         fontWeight = FontWeight.Bold,
-        fontSize = 14.sp
+        fontSize = 17.sp
     )
 )
 

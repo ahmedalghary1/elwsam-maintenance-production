@@ -107,7 +107,8 @@ data class SyncShiftReportInputDto(
     val status: String = "PENDING_HANDOVER",
     @SerialName("general_notes") val generalNotes: String = "",
     val entries: List<MachineEntryInputDto> = emptyList(),
-    val stoppages: List<StoppageInputDto> = emptyList()
+    val stoppages: List<StoppageInputDto> = emptyList(),
+    @SerialName("factory_id") val factoryId: Int? = null
 )
 
 @Serializable
@@ -128,6 +129,8 @@ data class MachineEntryInputDto(
     @SerialName("operation_mode") val operationMode: String = "AUTO",
     @SerialName("cooling_time_seconds") val coolingTimeSeconds: Double = 0.0,
     @SerialName("cycle_time_seconds") val cycleTimeSeconds: Double = 0.0,
+    @SerialName("original_cooling_time_seconds") val originalCoolingTimeSeconds: Double = 0.0,
+    @SerialName("original_cycle_time_seconds") val originalCycleTimeSeconds: Double = 0.0,
     @SerialName("raw_material") val rawMaterial: String = "",
     @SerialName("raw_material_option_id") val rawMaterialOptionId: Int? = null,
     @SerialName("final_production_weight_kg") val finalProductionWeightKg: Double = 0.0,
@@ -167,5 +170,53 @@ data class ShiftReportDto(
     @SerialName("handover_to_supervisor_name") val handoverToSupervisorName: String? = null,
     @SerialName("handover_confirmed_at") val handoverConfirmedAt: String? = null,
     @SerialName("handover_notes") val handoverNotes: String? = null,
-    @SerialName("general_notes") val generalNotes: String = ""
+    @SerialName("general_notes") val generalNotes: String = "",
+    @SerialName("started_at_device") val startedAtDevice: String? = null,
+    @SerialName("completed_at_device") val completedAtDevice: String? = null,
+    val supervisor: Int? = null,
+    @SerialName("machine_entries") val machineEntries: List<MachineEntryOutputDto> = emptyList(),
+    val stoppages: List<StoppageOutputDto> = emptyList()
+)
+
+@Serializable
+data class MachineEntryOutputDto(
+    val asset: Int,
+    @SerialName("asset_code") val assetCode: String = "",
+    val operator: Int? = null,
+    @SerialName("operator_name") val operatorName: String = "",
+    @SerialName("original_operator") val originalOperator: Int? = null,
+    @SerialName("original_operator_name") val originalOperatorName: String = "",
+    @SerialName("operator_changed") val operatorChanged: Boolean = false,
+    val product: Int? = null,
+    @SerialName("product_name") val productName: String = "",
+    @SerialName("original_product") val originalProduct: Int? = null,
+    @SerialName("original_product_name") val originalProductName: String = "",
+    @SerialName("product_changed") val productChanged: Boolean = false,
+    @SerialName("original_cavities") val originalCavities: Int = 1,
+    @SerialName("current_cavities") val currentCavities: Int = 1,
+    @SerialName("operation_mode") val operationMode: String = "AUTO",
+    @SerialName("cooling_time_seconds") val coolingTimeSeconds: Double = 0.0,
+    @SerialName("cycle_time_seconds") val cycleTimeSeconds: Double = 0.0,
+    @SerialName("original_cooling_time_seconds") val originalCoolingTimeSeconds: Double? = null,
+    @SerialName("original_cycle_time_seconds") val originalCycleTimeSeconds: Double? = null,
+    @SerialName("raw_material") val rawMaterial: String = "",
+    @SerialName("final_production_weight_kg") val finalProductionWeightKg: Double = 0.0,
+    @SerialName("final_production_quantity") val finalProductionQuantity: Double? = null,
+    @SerialName("final_production_unit") val finalProductionUnit: Int? = null,
+    @SerialName("final_production_unit_name") val finalProductionUnitName: String = "كجم",
+    @SerialName("target_cycle_production") val targetCycleProduction: Double = 0.0,
+    @SerialName("target_cycle_unit_name") val targetCycleUnitName: String = "",
+    @SerialName("packaging_type") val packagingType: String = "",
+    val notes: String = ""
+)
+
+@Serializable
+data class StoppageOutputDto(
+    val asset: Int? = null,
+    @SerialName("asset_code") val assetCode: String = "",
+    @SerialName("stoppage_type") val stoppageType: String,
+    @SerialName("stoppage_type_display") val stoppageTypeDisplay: String = "",
+    val description: String = "",
+    @SerialName("duration_minutes") val durationMinutes: Int = 0,
+    @SerialName("action_taken") val actionTaken: String = ""
 )

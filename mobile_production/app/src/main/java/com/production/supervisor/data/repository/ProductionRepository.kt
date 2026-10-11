@@ -1,12 +1,15 @@
 package com.production.supervisor.data.repository
 
 import com.production.supervisor.data.local.dao.ProductionDao
+import com.production.supervisor.data.local.dao.ReportSnapshot
 import com.production.supervisor.data.local.entity.*
 import com.production.supervisor.data.remote.api.ProductionApiService
 import com.production.supervisor.data.remote.dto.*
+import com.production.supervisor.data.sync.ProductionSyncScheduler
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
-import java.time.LocalDate
-import java.time.LocalTime
+import java.time.LocalDateTime
+import java.time.ZoneId
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -15,8 +18,17 @@ import javax.inject.Singleton
 class ProductionRepository @Inject constructor(
     private val api: ProductionApiService,
     private val dao: ProductionDao,
-    private val tokenManager: com.production.supervisor.data.local.datastore.TokenManager
+    private val tokenManager: com.production.supervisor.data.local.datastore.TokenManager,
+    private val synchronizer: ReportSynchronizer,
+    private val syncScheduler: ProductionSyncScheduler
 ) {
+    init {
+        syncScheduler.scheduleRecovery()
+    }
+
+    suspend fun getCachedShift(): String? = tokenManager.getAssignedShift()
+    suspend fun getCachedFactoryName(): String? = tokenManager.getSelectedFactoryName()
+    suspend fun getCachedFactoryId(): Int? = tokenManager.getSelectedFactoryId()?.toIntOrNull()
 
     fun getAssetsFlow(): Flow<List<AssetEntity>> = dao.getAssetsFlow()
     fun getProductsFlow(): Flow<List<ProductEntity>> = dao.getProductsFlow()
@@ -28,13 +40,15 @@ class ProductionRepository @Inject constructor(
 
     suspend fun refreshBootstrap(factoryId: String? = null): Result<ProductionBootstrapDto> {
         return try {
-            val targetFactoryId = factoryId ?: tokenManager.getSelectedFactoryId()
+            val previousFactoryId = getCachedFactoryId()
+            val targetFactoryId = factoryId ?: previousFactoryId?.toString()
             val response = api.getBootstrap(targetFactoryId)
             if (response.isSuccessful && response.body() != null) {
                 val data = response.body()!!
 
-                // Save selected factory
-                tokenManager.saveSelectedFactory(data.factory.id.toString(), data.factory.name)
+                // Legacy drafts belong to the factory selected before this bootstrap,
+                // including when an administrator switches to a different factory.
+                dao.assignLegacyReportFactory(previousFactoryId ?: data.factory.id)
 
                 // Build lookup maps for safe resolution
                 val productMap = data.products.associateBy { it.id }
@@ -75,9 +89,6 @@ class ProductionRepository @Inject constructor(
                         isActive = dto.isActive
                     )
                 }
-                dao.deleteAllAssets()
-                dao.insertAssets(assetEntities)
-
                 // Map and insert Products
                 val productEntities = data.products.map { dto ->
                     ProductEntity(
@@ -88,9 +99,6 @@ class ProductionRepository @Inject constructor(
                         isActive = dto.isActive
                     )
                 }
-                dao.deleteAllProducts()
-                dao.insertProducts(productEntities)
-
                 // Map and insert Operators
                 val operatorEntities = data.operators.map { dto ->
                     OperatorEntity(
@@ -100,55 +108,127 @@ class ProductionRepository @Inject constructor(
                         isActive = dto.isActive
                     )
                 }
-                dao.deleteAllOperators()
-                dao.insertOperators(operatorEntities)
-
                 val optionEntities = data.productionOptions.map { dto ->
                     ProductionOptionEntity(dto.id, dto.category, dto.name, dto.kgPerUnit)
                 }
-                dao.deleteAllProductionOptions()
-                dao.insertProductionOptions(optionEntities)
-
+                dao.replaceBootstrapCache(assetEntities, productEntities, operatorEntities, optionEntities)
+                tokenManager.saveSelectedFactory(data.factory.id.toString(), data.factory.name)
+                tokenManager.saveAssignedShift(data.user.shift)
+                dao.restoreServerReports(data.todayReports.filter {
+                    it.completedAtDevice != null || it.status == "CONFIRMED" || it.supervisor == data.user.id
+                }.map {
+                    val report = ShiftReportEntity(
+                        clientReportId = it.clientReportId,
+                        factoryId = data.factory.id,
+                        shift = it.shift,
+                        reportDate = it.reportDate,
+                        startedAtDevice = it.startedAtDevice ?: "${it.reportDate}T00:00:00",
+                        completedAtDevice = it.completedAtDevice,
+                        status = it.status,
+                        generalNotes = it.generalNotes,
+                        isSynced = true,
+                        handoverConfirmedAt = it.handoverConfirmedAt,
+                        handoverToSupervisorName = it.handoverToSupervisorName,
+                        handoverNotes = it.handoverNotes
+                    )
+                    ReportSnapshot(
+                        report = report,
+                        entries = it.machineEntries.map { entry ->
+                            MachineEntryEntity(
+                                clientReportId = it.clientReportId,
+                                assetId = entry.asset,
+                                assetCode = entry.assetCode,
+                                operatorId = entry.operator,
+                                operatorName = entry.operatorName,
+                                originalOperatorId = entry.originalOperator,
+                                originalOperatorName = entry.originalOperatorName,
+                                operatorChanged = entry.operatorChanged,
+                                productId = entry.product,
+                                productName = entry.productName,
+                                originalProductId = entry.originalProduct,
+                                originalProductName = entry.originalProductName,
+                                productChanged = entry.productChanged,
+                                originalCavities = entry.originalCavities,
+                                currentCavities = entry.currentCavities,
+                                operationMode = entry.operationMode,
+                                coolingTimeSeconds = entry.coolingTimeSeconds,
+                                cycleTimeSeconds = entry.cycleTimeSeconds,
+                                originalCoolingTimeSeconds = entry.originalCoolingTimeSeconds ?: entry.coolingTimeSeconds,
+                                originalCycleTimeSeconds = entry.originalCycleTimeSeconds ?: entry.cycleTimeSeconds,
+                                rawMaterial = entry.rawMaterial,
+                                rawMaterialOptionId = optionEntities.firstOrNull { option ->
+                                    option.category == "RAW_MATERIAL" && option.name == entry.rawMaterial
+                                }?.id,
+                                finalProductionWeightKg = entry.finalProductionWeightKg,
+                                finalProductionQuantity = entry.finalProductionQuantity ?: entry.finalProductionWeightKg,
+                                finalProductionUnitId = entry.finalProductionUnit,
+                                finalProductionUnitName = entry.finalProductionUnitName,
+                                targetCycleProduction = entry.targetCycleProduction,
+                                targetCycleUnitName = entry.targetCycleUnitName,
+                                packagingType = entry.packagingType,
+                                packagingOptionId = optionEntities.firstOrNull { option ->
+                                    option.category == "PACKAGING" && option.name == entry.packagingType
+                                }?.id,
+                                notes = entry.notes
+                            )
+                        },
+                        stoppages = it.stoppages.map { stoppage ->
+                            StoppageEntity(
+                                clientReportId = it.clientReportId,
+                                assetId = stoppage.asset,
+                                assetCode = stoppage.assetCode,
+                                stoppageType = stoppage.stoppageType,
+                                stoppageTypeDisplay = stoppage.stoppageTypeDisplay,
+                                description = stoppage.description,
+                                durationMinutes = stoppage.durationMinutes,
+                                actionTaken = stoppage.actionTaken
+                            )
+                        }
+                    )
+                })
+                requestPendingSync()
                 Result.success(data)
             } else {
                 val errorMsg = response.errorBody()?.string()?.takeIf { it.isNotBlank() }
                     ?: "فشل في تحميل البيانات الأساسية (${response.code()})"
                 Result.failure(Exception(errorMsg))
             }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
 
     suspend fun getOrCreateShiftReport(date: String, shift: String): ShiftReportEntity {
-        val existing = dao.findShiftReport(date, shift)
-        if (existing != null) {
-            return existing
-        }
+        val factoryId = getCachedFactoryId()
+            ?: throw IllegalStateException("اختر المصنع وحمّل بياناته قبل تسجيل التقرير.")
+        dao.assignLegacyReportFactory(factoryId)
         val newReport = ShiftReportEntity(
             clientReportId = UUID.randomUUID().toString(),
             shift = shift,
             reportDate = date,
-            startedAtDevice = "${date}T${LocalTime.now()}",
-            status = "PENDING_HANDOVER",
+            factoryId = factoryId,
+            startedAtDevice = LocalDateTime.now(ZoneId.of("Africa/Cairo")).toString(),
+            status = "DRAFT",
             isSynced = false
         )
-        dao.upsertShiftReport(newReport)
-        return newReport
+        return dao.getOrInsertShiftReport(newReport)
     }
 
     suspend fun saveMachineEntry(entry: MachineEntryEntity) {
-        dao.upsertMachineEntry(entry)
-        // Mark report as unsynced
-        dao.updateReportSyncStatus(entry.clientReportId, synced = false, status = "PENDING_HANDOVER")
-        // Trigger background sync
-        syncReportNow(entry.clientReportId)
+        dao.saveEntryLocally(entry)
+        requestSync(entry.clientReportId)
     }
 
     suspend fun addStoppage(stoppage: StoppageEntity) {
-        dao.insertStoppage(stoppage)
-        dao.updateReportSyncStatus(stoppage.clientReportId, synced = false, status = "PENDING_HANDOVER")
-        syncReportNow(stoppage.clientReportId)
+        dao.saveStoppageLocally(stoppage)
+        requestSync(stoppage.clientReportId)
+    }
+
+    suspend fun saveStoppedMachine(entry: MachineEntryEntity, stoppage: StoppageEntity) {
+        dao.saveStoppedMachineLocally(entry, stoppage)
+        requestSync(entry.clientReportId)
     }
 
     suspend fun addFridayPrayerStoppage(clientReportId: String) {
@@ -167,112 +247,35 @@ class ProductionRepository @Inject constructor(
 
     suspend fun finishShift(clientReportId: String, notes: String): Result<Unit> {
         return try {
-            val existing = dao.getShiftReport(clientReportId)
-            val nowTime = "${LocalDate.now()}T${LocalTime.now()}"
-            if (existing != null) {
-                dao.markReportFinished(
-                    reportId = clientReportId,
-                    status = "PENDING_HANDOVER",
-                    notes = notes,
-                    completedAt = nowTime
-                )
-            } else {
-                val reportToSave = ShiftReportEntity(
-                    clientReportId = clientReportId,
-                    shift = "FIRST",
-                    reportDate = LocalDate.now().toString(),
-                    startedAtDevice = nowTime,
-                    completedAtDevice = nowTime,
-                    status = "PENDING_HANDOVER",
-                    generalNotes = notes,
-                    isSynced = false
-                )
-                dao.upsertShiftReport(reportToSave)
-            }
-            syncReportNow(clientReportId)
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    suspend fun confirmHandover(clientReportId: String, notes: String): Result<Unit> {
-        return try {
-            val res = api.confirmHandover(ConfirmHandoverInputDto(clientReportId, notes))
-            if (res.isSuccessful) {
-                dao.updateReportSyncStatus(clientReportId, synced = true, status = "CONFIRMED")
-                Result.success(Unit)
-            } else {
-                Result.failure(Exception(res.errorBody()?.string() ?: "فشل في تأكيد الاستلام"))
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    suspend fun syncReportNow(clientReportId: String): Result<Unit> {
-        return try {
-            val report = dao.getShiftReport(clientReportId)
-            val entries = dao.getEntriesForReport(clientReportId)
-            val stoppages = dao.getStoppagesForReport(clientReportId)
-
-            val inputDto = SyncShiftReportInputDto(
-                clientReportId = clientReportId,
-                shift = report?.shift ?: "FIRST",
-                reportDate = report?.reportDate ?: LocalDate.now().toString(),
-                startedAtDevice = report?.startedAtDevice,
-                completedAtDevice = report?.completedAtDevice,
-                status = report?.status ?: "PENDING_HANDOVER",
-                generalNotes = report?.generalNotes ?: "",
-                entries = entries.map {
-                    MachineEntryInputDto(
-                        assetId = it.assetId,
-                        operatorId = it.operatorId,
-                        operatorName = it.operatorName,
-                        originalOperatorId = it.originalOperatorId,
-                        originalOperatorName = it.originalOperatorName,
-                        operatorChanged = it.operatorChanged,
-                        productId = it.productId,
-                        productName = it.productName,
-                        originalProductId = it.originalProductId,
-                        originalProductName = it.originalProductName,
-                        productChanged = it.productChanged,
-                        originalCavities = it.originalCavities,
-                        currentCavities = it.currentCavities,
-                        operationMode = it.operationMode,
-                        coolingTimeSeconds = it.coolingTimeSeconds,
-                        cycleTimeSeconds = it.cycleTimeSeconds,
-                        rawMaterial = it.rawMaterial,
-                        rawMaterialOptionId = it.rawMaterialOptionId,
-                        finalProductionWeightKg = it.finalProductionWeightKg,
-                        finalProductionQuantity = it.finalProductionQuantity,
-                        finalProductionUnitId = it.finalProductionUnitId,
-                        targetCycleProduction = it.targetCycleProduction,
-                        packagingType = it.packagingType,
-                        packagingOptionId = it.packagingOptionId,
-                        notes = it.notes
-                    )
-                },
-                stoppages = stoppages.map {
-                    StoppageInputDto(
-                        assetId = it.assetId,
-                        stoppageType = it.stoppageType,
-                        description = it.description,
-                        durationMinutes = it.durationMinutes,
-                        actionTaken = it.actionTaken
-                    )
-                }
+            dao.finishReportLocally(
+                clientReportId, notes, LocalDateTime.now(ZoneId.of("Africa/Cairo")).toString()
             )
-
-            val response = api.syncShiftReport(inputDto)
-            if (response.isSuccessful) {
-                dao.updateReportSyncStatus(clientReportId, synced = true, status = response.body()?.status ?: "PENDING_HANDOVER")
-                Result.success(Unit)
-            } else {
-                Result.failure(Exception("تعذر إرسال التقرير للسيرفر"))
-            }
+            requestSync(clientReportId)
+            Result.success(Unit)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    suspend fun confirmHandover(clientReportId: String, notes: String): Result<Unit> =
+        synchronizer.confirmHandover(clientReportId, notes)
+
+    fun requestSync(clientReportId: String) = syncScheduler.requestSync(clientReportId)
+
+    private suspend fun requestPendingSync() {
+        dao.getUnsyncedReports().filter { it.factoryId != null }.forEach { requestSync(it.clientReportId) }
+    }
+
+    suspend fun syncReportNow(clientReportId: String): Result<Unit> = synchronizer.syncReportNow(clientReportId)
+
+    suspend fun syncPendingReports(): Result<Unit> {
+        var firstFailure: Throwable? = null
+        dao.getUnsyncedReports().forEach {
+            val result = syncReportNow(it.clientReportId)
+            if (result.isFailure && firstFailure == null) firstFailure = result.exceptionOrNull()
+        }
+        return firstFailure?.let { Result.failure(it) } ?: Result.success(Unit)
     }
 }

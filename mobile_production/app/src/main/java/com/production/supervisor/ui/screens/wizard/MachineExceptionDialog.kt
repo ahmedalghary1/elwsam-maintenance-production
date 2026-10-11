@@ -42,9 +42,9 @@ fun MachineExceptionDialog(
     onDismiss: () -> Unit,
     onConfirm: (selectedOperatorId: Int?, selectedProductId: Int?, selectedCavities: Int) -> Unit
 ) {
-    var selectedOpId by remember { mutableStateOf(currentOperatorId) }
-    var selectedProdId by remember { mutableStateOf(currentProductId) }
-    var cavities by remember { mutableStateOf(currentCavities.coerceAtLeast(1)) }
+    var selectedOpId by remember(asset.id) { mutableStateOf(currentOperatorId) }
+    var selectedProdId by remember(asset.id) { mutableStateOf(currentProductId) }
+    var cavities by remember(asset.id) { mutableStateOf(currentCavities.coerceAtLeast(1)) }
     var activeTab by remember { mutableStateOf(0) } // 0: Operator, 1: Product, 2: Cavities
 
     Dialog(
@@ -72,13 +72,13 @@ fun MachineExceptionDialog(
                 ) {
                     Column {
                         Text(
-                            text = "تعديل الاستثناءات: ${asset.assetCode}",
+                            text = "إعدادات ماكينة ${asset.assetCode}",
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
                             color = FactoryDark
                         )
                         Text(
-                            text = "تغيير العامل أو المنتج المشغل لهذه الوردية فقط",
+                            text = "تظهر التغييرات في التقرير عند الضغط على حفظ",
                             fontSize = 12.sp,
                             color = FactoryTextSecondary
                         )
@@ -138,7 +138,7 @@ fun MachineExceptionDialog(
                                     val isDefault = op.id == asset.defaultOperatorId
                                     ItemSelectionCard(
                                         title = op.name,
-                                        subtitle = if (isDefault) "⭐ العامل المعتاد للماكينة" else op.phone,
+                                        subtitle = if (isDefault) "العامل الافتراضي للماكينة" else op.phone,
                                         isSelected = isSelected,
                                         badge = if (isDefault) "المعتاد" else null,
                                         onClick = { selectedOpId = op.id }
@@ -165,7 +165,7 @@ fun MachineExceptionDialog(
                                     val isDefault = prod.id == asset.defaultProductId
                                     ItemSelectionCard(
                                         title = prod.name,
-                                        subtitle = if (isDefault) "⭐ الاسطمبة والمنتج المعتاد" else "كود: ${prod.code}",
+                                        subtitle = if (isDefault) "المنتج الافتراضي للماكينة" else "كود: ${prod.code}",
                                         isSelected = isSelected,
                                         badge = if (isDefault) "المعتاد" else null,
                                         onClick = { selectedProdId = prod.id }
@@ -183,7 +183,7 @@ fun MachineExceptionDialog(
                                 verticalArrangement = Arrangement.Center
                             ) {
                                 Text(
-                                    text = "عدد اللقم الشغالة في الاسطمبة:",
+                                    text = "عدد اللقم الحالية:",
                                     fontSize = 16.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = FactoryDark

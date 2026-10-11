@@ -44,19 +44,18 @@ fun ProductionHomeScreen(
     var showFinishShiftDialog by remember { mutableStateOf(false) }
     var finishShiftNotes by remember { mutableStateOf("") }
 
-    LaunchedEffect(uiState.message) {
-        uiState.message?.let {
-            snackbarHostState.showSnackbar(it)
-            viewModel.clearMessage()
-        }
-    }
-
     if (uiState.isFawryMode) {
         FawryWizardScreen(
             viewModel = viewModel,
             onLogout = onLogout
         )
         return
+    }
+    LaunchedEffect(uiState.message) {
+        uiState.message?.let {
+            viewModel.clearMessage()
+            snackbarHostState.showSnackbar(it)
+        }
     }
 
     Scaffold(
@@ -105,7 +104,7 @@ fun ProductionHomeScreen(
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                         modifier = Modifier.height(34.dp)
                     ) {
-                        Text("⚡ وضع فوري", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("تسجيل مبسط", fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     }
                     IconButton(onClick = { viewModel.loadData() }) {
                         Icon(Icons.Default.Refresh, contentDescription = "تحديث", tint = Color.White)
@@ -133,6 +132,7 @@ fun ProductionHomeScreen(
                 ) {
                     Button(
                         onClick = { viewModel.openStoppageDialog() },
+                        enabled = !uiState.isReportFinished && !uiState.isSavingEntry && !uiState.isFinishingShift,
                         modifier = Modifier.weight(1f).height(48.dp),
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = FactoryOrange),
@@ -145,6 +145,7 @@ fun ProductionHomeScreen(
 
                     Button(
                         onClick = { showFinishShiftDialog = true },
+                        enabled = uiState.assets.isNotEmpty() && uiState.assets.all { isMachineRecorded(uiState.entries[it.id], uiState.stoppages) } && !uiState.isReportFinished && !uiState.isSavingEntry && !uiState.isFinishingShift,
                         modifier = Modifier.weight(1f).height(48.dp),
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = FactoryNavy),
@@ -288,7 +289,7 @@ fun ProductionHomeScreen(
 
             // 4. Statistics Banner
             item {
-                val recordedCount = uiState.entries.size
+                val recordedCount = uiState.assets.count { isMachineRecorded(uiState.entries[it.id], uiState.stoppages) }
                 val totalMachines = uiState.assets.size
                 val totalWeight = uiState.entries.values.sumOf { it.finalProductionWeightKg }
 
@@ -334,14 +335,14 @@ fun ProductionHomeScreen(
             // 6. Machines List Items
             items(uiState.assets, key = { it.id }) { asset ->
                 val entry = uiState.entries[asset.id]
-                val isRecorded = entry != null
+                val isRecorded = isMachineRecorded(entry, uiState.stoppages)
                 val hasStoppage = uiState.stoppages.any { it.assetId == asset.id }
 
                 MachineCard(
                     asset = asset,
                     entry = entry,
                     hasStoppage = hasStoppage,
-                    onClick = { viewModel.openMachineEntry(asset) }
+                    onClick = { if (!uiState.isReportFinished && !uiState.isSavingEntry) viewModel.openMachineEntry(asset) }
                 )
             }
 
@@ -361,7 +362,8 @@ fun ProductionHomeScreen(
                 products = uiState.products,
                 productionOptions = uiState.productionOptions,
                 onDismiss = { viewModel.closeMachineEntry() },
-                onSave = { entry -> viewModel.saveMachineEntry(entry) }
+                onSave = { entry -> viewModel.saveMachineEntry(entry) },
+                isSaving = uiState.isSavingEntry
             )
         }
     }
@@ -461,6 +463,7 @@ fun ProductionHomeScreen(
                         viewModel.finishShift(finishShiftNotes)
                         showFinishShiftDialog = false
                     },
+                    enabled = !uiState.isFinishingShift && !uiState.isSavingEntry && !uiState.isReportFinished && uiState.assets.all { isMachineRecorded(uiState.entries[it.id], uiState.stoppages) },
                     colors = ButtonDefaults.buttonColors(containerColor = FactoryGreen),
                     shape = RoundedCornerShape(10.dp)
                 ) {
@@ -603,17 +606,17 @@ fun MachineCard(
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 if (entry != null) {
-                    val cavitiesVal = if (entry.currentCavities != asset.originalCavities) {
-                        "${entry.currentCavities}/${asset.originalCavities}"
+                    val cavitiesVal = if (entry.currentCavities != entry.originalCavities) {
+                        "${entry.currentCavities}/${entry.originalCavities}"
                     } else {
-                        "${asset.originalCavities}"
+                        "${entry.originalCavities}"
                     }
                     SpecBadge(label = "اللقم", value = cavitiesVal)
-                    val cooling = if (entry.coolingTimeSeconds > 0) entry.coolingTimeSeconds else asset.coolingTimeSeconds
+                    val cooling = entry.coolingTimeSeconds
                     if (cooling > 0) {
                         SpecBadge(label = "تبريد", value = "${cooling}ث")
                     }
-                    val cycle = if (entry.cycleTimeSeconds > 0) entry.cycleTimeSeconds else asset.cycleTimeSeconds
+                    val cycle = entry.cycleTimeSeconds
                     if (cycle > 0) {
                         SpecBadge(label = "دورة", value = "${cycle}ث")
                     }
@@ -660,7 +663,7 @@ fun MachineCard(
                                         .background(FactoryLightOrange, RoundedCornerShape(4.dp))
                                         .padding(horizontal = 4.dp, vertical = 1.dp)
                                 ) {
-                                    Text("تغيير عامل!", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = FactoryOrangeDark)
+                                    Text("عامل مختلف", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = FactoryTextSecondary)
                                 }
                             }
                         }
@@ -691,7 +694,7 @@ fun MachineCard(
                                         .background(FactoryLightOrange, RoundedCornerShape(4.dp))
                                         .padding(horizontal = 4.dp, vertical = 1.dp)
                                 ) {
-                                    Text("تغيير منتج!", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = FactoryOrangeDark)
+                                    Text("منتج مختلف", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = FactoryTextSecondary)
                                 }
                             }
                         }
@@ -720,7 +723,7 @@ fun MachineCard(
                             Icon(Icons.Outlined.GridOn, contentDescription = null, modifier = Modifier.size(12.dp), tint = FactoryTextMuted)
                             Spacer(modifier = Modifier.width(3.dp))
                             Text(
-                                text = "${entry.currentCavities}/${entry.originalCavities} | ${if (entry.operationMode == "AUTO") "أوتو" else "يدوي"}",
+                                text = "الحالية: ${entry.currentCavities} • الأصلية: ${entry.originalCavities} | ${if (entry.operationMode == "AUTO") "تلقائي" else "يدوي"}",
                                 fontSize = 11.sp,
                                 color = FactoryTextMuted
                             )

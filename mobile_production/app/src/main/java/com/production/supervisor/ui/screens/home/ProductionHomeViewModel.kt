@@ -9,19 +9,21 @@ import com.production.supervisor.data.repository.ProductionRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 import java.time.LocalDate
+import java.time.ZoneId
 import javax.inject.Inject
 
 enum class WizardSubStep {
-    STATUS,     // السؤال الرئيسي: شغالة تمام أم عطلانة
-    WEIGHT,     // إدخال الوزن بواسطة كيبورد ATM
-    STOPPAGE,   // تسجيل سبب التوقف والمدة
-    SUMMARY     // شاشة المراجعة والتسليم النهائي
+    STATUS,
+    WEIGHT,
+    STOPPAGE,
+    SUMMARY
 }
 
 data class ProductionHomeUiState(
     val selectedShift: String = "FIRST", // FIRST, SECOND, THIRD
-    val currentDate: String = LocalDate.now().toString(),
+    val currentDate: String = LocalDate.now(ZoneId.of("Africa/Cairo")).toString(),
     val currentReportId: String = "",
     val factoryName: String = "",
     val factoryCode: String = "",
@@ -36,6 +38,11 @@ data class ProductionHomeUiState(
     val stoppages: List<StoppageEntity> = emptyList(),
     val pendingHandover: ShiftReportDto? = null,
     val isLoading: Boolean = false,
+    val isSavingEntry: Boolean = false,
+    val isFinishingShift: Boolean = false,
+    val isReportFinished: Boolean = false,
+    val isReportSynced: Boolean = false,
+    val reportStatus: String = "DRAFT",
     val message: String? = null,
     val selectedAssetForEntry: AssetEntity? = null,
     val isStoppageDialogVisible: Boolean = false,
@@ -59,10 +66,6 @@ class ProductionHomeViewModel @Inject constructor(
 
     init {
         observeDatabase()
-        viewModelScope.launch {
-            val report = repository.getOrCreateShiftReport(_uiState.value.currentDate, _uiState.value.selectedShift)
-            _uiState.update { it.copy(currentReportId = report.clientReportId) }
-        }
         loadData()
     }
 
@@ -90,8 +93,9 @@ class ProductionHomeViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.map { it.currentReportId }
                 .distinctUntilChanged()
-                .filter { it.isNotBlank() }
-                .flatMapLatest { reportId -> repository.getEntriesFlow(reportId) }
+                .flatMapLatest { reportId ->
+                    if (reportId.isBlank()) flowOf(emptyList()) else repository.getEntriesFlow(reportId)
+                }
                 .collect { entryList ->
                     val map = entryList.associateBy { it.assetId }
                     _uiState.update { it.copy(entries = map) }
@@ -100,49 +104,82 @@ class ProductionHomeViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.map { it.currentReportId }
                 .distinctUntilChanged()
-                .filter { it.isNotBlank() }
-                .flatMapLatest { reportId -> repository.getStoppagesFlow(reportId) }
+                .flatMapLatest { reportId ->
+                    if (reportId.isBlank()) flowOf(emptyList()) else repository.getStoppagesFlow(reportId)
+                }
                 .collect { stopList ->
                     _uiState.update { it.copy(stoppages = stopList) }
+                }
+        }
+        viewModelScope.launch {
+            _uiState.map { it.currentReportId }.distinctUntilChanged()
+                .flatMapLatest { reportId ->
+                    if (reportId.isBlank()) flowOf(null) else repository.getShiftReportFlow(reportId)
+                }
+                .collect { report ->
+                    _uiState.update {
+                        it.copy(
+                            reportStatus = report?.status ?: "DRAFT",
+                            isReportFinished = report?.completedAtDevice != null || report?.status == "CONFIRMED",
+                            isReportSynced = report?.isSynced == true
+                        )
+                    }
                 }
         }
     }
 
     fun loadData(factoryId: String? = null) {
+        if (_uiState.value.isLoading || _uiState.value.isSavingEntry || _uiState.value.isFinishingShift) return
+        _uiState.update { it.copy(isLoading = true) }
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true) }
-
-            // 1. Fetch bootstrap from backend
-            val bootstrapResult = repository.refreshBootstrap(factoryId)
-            var currentShift = _uiState.value.selectedShift
-
-            bootstrapResult.onSuccess { bootstrap ->
-                val assignedShift = bootstrap.user.shift
-                if (!assignedShift.isNullOrBlank() && factoryId == null) {
-                    currentShift = assignedShift
+            try {
+                val bootstrapResult = repository.refreshBootstrap(factoryId)
+                var currentShift = _uiState.value.selectedShift
+                bootstrapResult.onSuccess { bootstrap ->
+                    currentShift = bootstrap.user.shift?.takeIf { it.isNotBlank() } ?: currentShift
+                    _uiState.update {
+                        it.copy(
+                            currentUser = bootstrap.user,
+                            selectedShift = currentShift,
+                            currentDate = bootstrap.serverDate,
+                            pendingHandover = bootstrap.pendingHandover,
+                            factoryName = bootstrap.factory.name,
+                            factoryCode = bootstrap.factory.code,
+                            selectedFactoryId = bootstrap.factory.id,
+                            availableFactories = bootstrap.factories.ifEmpty { listOf(bootstrap.factory) },
+                            message = if (factoryId != null) "تم تحميل بيانات ${bootstrap.factory.name}" else null
+                        )
+                    }
+                }.onFailure {
+                    currentShift = repository.getCachedShift() ?: currentShift
+                    val cachedFactoryName = repository.getCachedFactoryName().orEmpty()
+                    val cachedFactoryId = repository.getCachedFactoryId()
+                    _uiState.update {
+                        it.copy(
+                            selectedShift = currentShift,
+                            factoryName = cachedFactoryName,
+                            selectedFactoryId = cachedFactoryId,
+                            message = "تعذر التحديث. يمكنك إكمال التقرير بالبيانات المحفوظة على الهاتف."
+                        )
+                    }
                 }
+                val report = repository.getOrCreateShiftReport(_uiState.value.currentDate, currentShift)
                 _uiState.update {
                     it.copy(
-                        currentUser = bootstrap.user,
-                        selectedShift = currentShift,
-                        pendingHandover = bootstrap.pendingHandover,
-                        factoryName = bootstrap.factory.name,
-                        factoryCode = bootstrap.factory.code,
-                        selectedFactoryId = bootstrap.factory.id,
-                        availableFactories = bootstrap.factories.ifEmpty { listOf(bootstrap.factory) },
-                        message = if (factoryId != null) "تم تحميل بيانات ${bootstrap.factory.name}" else null
+                        currentReportId = report.clientReportId,
+                        wizardStarted = if (factoryId != null) false else it.wizardStarted,
+                        wizardAssetIndex = if (factoryId != null) 0 else it.wizardAssetIndex,
+                        wizardSubStep = if (factoryId != null) WizardSubStep.STATUS else it.wizardSubStep,
+                        isLoading = false
                     )
                 }
-            }.onFailure { ex ->
+            } catch (ex: CancellationException) {
+                throw ex
+            } catch (ex: Exception) {
                 _uiState.update {
-                    it.copy(message = ex.message ?: "تعذر الاتصال بالسيرفر، يتم عرض البيانات المحلية")
+                    it.copy(isLoading = false, message = ex.message ?: "تعذر فتح التقرير. أعد المحاولة.")
                 }
             }
-
-            // 2. Setup current report
-            val date = _uiState.value.currentDate
-            val report = repository.getOrCreateShiftReport(date, currentShift)
-            _uiState.update { it.copy(currentReportId = report.clientReportId, isLoading = false) }
         }
     }
 
@@ -151,14 +188,21 @@ class ProductionHomeViewModel @Inject constructor(
     }
 
     fun setShift(shift: String) {
+        if (_uiState.value.isLoading || _uiState.value.isSavingEntry || _uiState.value.isFinishingShift) return
         viewModelScope.launch {
-            _uiState.update { it.copy(selectedShift = shift) }
-            val report = repository.getOrCreateShiftReport(_uiState.value.currentDate, shift)
-            _uiState.update { it.copy(currentReportId = report.clientReportId) }
+            try {
+                val report = repository.getOrCreateShiftReport(_uiState.value.currentDate, shift)
+                _uiState.update { it.copy(selectedShift = shift, currentReportId = report.clientReportId, wizardStarted = false) }
+            } catch (ex: CancellationException) {
+                throw ex
+            } catch (ex: Exception) {
+                _uiState.update { it.copy(message = ex.message ?: "تعذر فتح الوردية") }
+            }
         }
     }
 
     fun openMachineEntry(asset: AssetEntity) {
+        if (!canEditReport()) return
         _uiState.update { it.copy(selectedAssetForEntry = asset) }
     }
 
@@ -167,24 +211,19 @@ class ProductionHomeViewModel @Inject constructor(
     }
 
     fun saveMachineEntry(entry: MachineEntryEntity) {
-        viewModelScope.launch {
-            val validReportId = if (entry.clientReportId.isNotBlank()) {
-                entry.clientReportId
-            } else if (_uiState.value.currentReportId.isNotBlank()) {
-                _uiState.value.currentReportId
-            } else {
-                val rep = repository.getOrCreateShiftReport(_uiState.value.currentDate, _uiState.value.selectedShift)
-                _uiState.update { it.copy(currentReportId = rep.clientReportId) }
-                rep.clientReportId
-            }
-            val finalEntry = if (entry.clientReportId != validReportId) entry.copy(clientReportId = validReportId) else entry
+        if (!validMachineValues(entry.finalProductionQuantity, entry.currentCavities, entry.originalCavities,
+                entry.coolingTimeSeconds, entry.cycleTimeSeconds)) return
+        saveEntryLocally {
+            val finalEntry = entry.copy(clientReportId = _uiState.value.currentReportId)
             repository.saveMachineEntry(finalEntry)
+            _uiState.update { it.copy(entries = it.entries + (finalEntry.assetId to finalEntry)) }
             closeMachineEntry()
-            _uiState.update { it.copy(message = "تم تسجيل بيانات ماكينة ${finalEntry.assetCode} بنجاح") }
+            _uiState.update { it.copy(message = "تم حفظ بيانات الماكينة ${finalEntry.assetCode}") }
         }
     }
 
     fun openStoppageDialog() {
+        if (!canEditReport()) return
         _uiState.update { it.copy(isStoppageDialogVisible = true) }
     }
 
@@ -193,15 +232,19 @@ class ProductionHomeViewModel @Inject constructor(
     }
 
     fun addStoppage(stoppage: StoppageEntity) {
-        viewModelScope.launch {
-            repository.addStoppage(stoppage)
+        if (stoppage.durationMinutes <= 0 || stoppage.description.isBlank()) {
+            _uiState.update { it.copy(message = "أدخل سبب التوقف ومدة أكبر من صفر") }
+            return
+        }
+        saveEntryLocally {
+            repository.addStoppage(stoppage.copy(clientReportId = _uiState.value.currentReportId))
             closeStoppageDialog()
             _uiState.update { it.copy(message = "تم تسجيل التوقف بنجاح") }
         }
     }
 
     fun addFridayPrayerStoppage() {
-        viewModelScope.launch {
+        saveEntryLocally {
             repository.addFridayPrayerStoppage(_uiState.value.currentReportId)
             _uiState.update { it.copy(message = "تم تسجيل إيقاف صلاة الجمعة لجميع الماكينات (60 دقيقة)") }
         }
@@ -216,9 +259,10 @@ class ProductionHomeViewModel @Inject constructor(
     }
 
     fun confirmHandover(notes: String) {
+        if (_uiState.value.isLoading || _uiState.value.isSavingEntry || _uiState.value.isFinishingShift) return
         val pending = _uiState.value.pendingHandover ?: return
+        _uiState.update { it.copy(isLoading = true) }
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true) }
             val result = repository.confirmHandover(pending.clientReportId, notes)
             result.onSuccess {
                 _uiState.update {
@@ -241,14 +285,65 @@ class ProductionHomeViewModel @Inject constructor(
     }
 
     fun finishShift(notes: String) {
+        val state = _uiState.value
+        if (state.isFinishingShift || state.isSavingEntry || state.isLoading || state.isReportFinished) return
+        val missing = state.assets.filter { asset ->
+            !isMachineRecorded(state.entries[asset.id], state.stoppages)
+        }
+        if (state.currentReportId.isBlank() || state.assets.isEmpty() || missing.isNotEmpty()) {
+            _uiState.update { it.copy(message = "أكمل بيانات جميع الماكينات قبل تسليم التقرير") }
+            return
+        }
+        _uiState.update { it.copy(isFinishingShift = true) }
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true) }
-            repository.finishShift(_uiState.value.currentReportId, notes)
-            _uiState.update {
-                it.copy(
-                    isLoading = false,
-                    message = "تم إنهاء الوردية وجاهزة لاستلام المشرف التالي"
-                )
+            try {
+                repository.finishShift(state.currentReportId, notes)
+                    .onSuccess {
+                        _uiState.update { it.copy(isReportFinished = true, message = "تم حفظ التقرير. يظهر تأكيد الإرسال عند وصوله إلى الموقع.") }
+                    }.onFailure { ex ->
+                        _uiState.update { it.copy(message = ex.message ?: "تعذر حفظ التقرير. أعد المحاولة.") }
+                    }
+            } finally {
+                _uiState.update { it.copy(isFinishingShift = false) }
+            }
+        }
+    }
+
+    fun retrySync() {
+        val reportId = _uiState.value.currentReportId.takeIf { it.isNotBlank() } ?: return
+        repository.requestSync(reportId)
+        _uiState.update { it.copy(message = "سيتم إرسال التقرير عند توفر الاتصال") }
+    }
+
+    private fun canEditReport(): Boolean {
+        val state = _uiState.value
+        if (state.isReportFinished) {
+            _uiState.update { it.copy(message = "تم تسليم هذا التقرير؛ يمكنك مراجعة البيانات") }
+            return false
+        }
+        return !state.isLoading && !state.isSavingEntry && !state.isFinishingShift && state.currentReportId.isNotBlank()
+    }
+
+    private fun validMachineValues(quantity: Double, currentCavities: Int, originalCavities: Int,
+                                   cooling: Double, cycle: Double): Boolean {
+        val valid = quantity.isFinite() && quantity >= 0 && currentCavities >= 1 && originalCavities >= 1 &&
+            cooling.isFinite() && cooling >= 0 && cycle.isFinite() && cycle >= 0
+        if (!valid) _uiState.update { it.copy(message = "راجع الكمية واللقم وأزمنة الدورة والتبريد") }
+        return valid
+    }
+
+    private fun saveEntryLocally(action: suspend () -> Unit) {
+        if (!canEditReport()) return
+        _uiState.update { it.copy(isSavingEntry = true) }
+        viewModelScope.launch {
+            try {
+                action()
+            } catch (ex: CancellationException) {
+                throw ex
+            } catch (ex: Exception) {
+                _uiState.update { it.copy(message = ex.message ?: "تعذر الحفظ. أعد المحاولة.") }
+            } finally {
+                _uiState.update { it.copy(isSavingEntry = false) }
             }
         }
     }
@@ -261,10 +356,14 @@ class ProductionHomeViewModel @Inject constructor(
         _uiState.update { it.copy(isFawryMode = enabled) }
     }
 
-    fun startWizard(targetIndex: Int = 0) {
+    fun startWizard(targetIndex: Int? = null) {
         val assets = _uiState.value.assets
-        val firstUnrecordedIndex = assets.indexOfFirst { _uiState.value.entries[it.id] == null }
-        val startIndex = if (targetIndex != 0) {
+        if (assets.isEmpty() || _uiState.value.isLoading || _uiState.value.isSavingEntry) return
+        val state = _uiState.value
+        val firstUnrecordedIndex = assets.indexOfFirst { asset ->
+            !isMachineRecorded(state.entries[asset.id], state.stoppages)
+        }
+        val startIndex = if (targetIndex != null) {
             targetIndex.coerceIn(0, (assets.size - 1).coerceAtLeast(0))
         } else if (firstUnrecordedIndex != -1) {
             firstUnrecordedIndex
@@ -275,12 +374,13 @@ class ProductionHomeViewModel @Inject constructor(
             it.copy(
                 wizardStarted = true,
                 wizardAssetIndex = startIndex,
-                wizardSubStep = WizardSubStep.STATUS
+                wizardSubStep = if (it.isReportFinished) WizardSubStep.SUMMARY else WizardSubStep.STATUS
             )
         }
     }
 
     fun exitWizardToWelcome() {
+        if (_uiState.value.isSavingEntry || _uiState.value.isFinishingShift) return
         _uiState.update {
             it.copy(
                 wizardStarted = false,
@@ -290,6 +390,7 @@ class ProductionHomeViewModel @Inject constructor(
     }
 
     fun setWizardAssetIndex(index: Int) {
+        if (!canEditReport()) return
         val totalAssets = _uiState.value.assets.size
         if (index in 0 until totalAssets) {
             _uiState.update {
@@ -326,6 +427,7 @@ class ProductionHomeViewModel @Inject constructor(
     }
 
     fun previousWizardMachine() {
+        if (_uiState.value.isSavingEntry || _uiState.value.isReportFinished) return
         val currentIndex = _uiState.value.wizardAssetIndex
         if (_uiState.value.wizardSubStep == WizardSubStep.SUMMARY) {
             _uiState.update {
@@ -353,6 +455,7 @@ class ProductionHomeViewModel @Inject constructor(
     }
 
     fun openExceptionDialog(asset: AssetEntity) {
+        if (!canEditReport()) return
         _uiState.update { it.copy(exceptionAssetForEdit = asset) }
     }
 
@@ -375,24 +478,29 @@ class ProductionHomeViewModel @Inject constructor(
         clearOperator: Boolean = false,
         clearProduct: Boolean = false,
         notes: String = "",
+        originalCavities: Int = asset.originalCavities,
         advance: Boolean = true
     ) {
-        viewModelScope.launch {
-            val validReportId = if (_uiState.value.currentReportId.isNotBlank()) {
-                _uiState.value.currentReportId
-            } else {
-                val rep = repository.getOrCreateShiftReport(_uiState.value.currentDate, _uiState.value.selectedShift)
-                _uiState.update { it.copy(currentReportId = rep.clientReportId) }
-                rep.clientReportId
-            }
+        if (!validMachineValues(quantity, currentCavities, originalCavities, coolingTimeSeconds, cycleTimeSeconds)) return
+        if (quantity == 0.0 && advance) {
+            _uiState.update { it.copy(message = "أدخل كمية الإنتاج، أو اختر تسجيل توقف") }
+            return
+        }
+        saveEntryLocally {
+            val validReportId = _uiState.value.currentReportId
 
+            val existing = _uiState.value.entries[asset.id]
             val operator = customOperatorId?.let { id -> _uiState.value.operators.find { it.id == id } }
             val product = customProductId?.let { id -> _uiState.value.products.find { it.id == id } }
 
-            val resolvedOperatorId = if (clearOperator) null else operator?.id ?: asset.defaultOperatorId
-            val resolvedOperatorName = if (clearOperator) "" else operator?.name ?: asset.defaultOperatorName ?: ""
-            val resolvedProductId = if (clearProduct) null else product?.id ?: asset.defaultProductId
-            val resolvedProductName = if (clearProduct) "" else product?.name ?: asset.defaultProductName ?: ""
+            val resolvedOperatorId = if (clearOperator) null else customOperatorId ?: existing?.operatorId ?: asset.defaultOperatorId
+            val resolvedOperatorName = if (clearOperator) "" else operator?.name
+                ?: existing?.takeIf { it.operatorId == resolvedOperatorId }?.operatorName ?: asset.defaultOperatorName.orEmpty()
+            val resolvedProductId = if (clearProduct) null else customProductId ?: existing?.productId ?: asset.defaultProductId
+            val resolvedProductName = if (clearProduct) "" else product?.name
+                ?: existing?.takeIf { it.productId == resolvedProductId }?.productName ?: asset.defaultProductName.orEmpty()
+            val originalOperatorId = if (existing != null) existing.originalOperatorId else asset.defaultOperatorId
+            val originalProductId = if (existing != null) existing.originalProductId else asset.defaultProductId
             val selectedUnit = finalUnit ?: _uiState.value.productionOptions.find { it.id == asset.defaultFinalUnitId }
                 ?: _uiState.value.productionOptions.firstOrNull { it.category == "FINAL_UNIT" && it.name == "كجم" }
             val selectedMaterial = rawMaterial ?: _uiState.value.productionOptions.find { it.id == asset.defaultRawMaterialId }
@@ -402,7 +510,6 @@ class ProductionHomeViewModel @Inject constructor(
             val weightKg = if (kgFactor != null) quantity * kgFactor
                 else if (unitName in setOf("كجم", "كيلو", "كيلوجرام")) quantity else 0.0
 
-            val existing = _uiState.value.entries[asset.id]
             val entry = MachineEntryEntity(
                 id = existing?.id ?: 0,
                 clientReportId = validReportId,
@@ -410,19 +517,21 @@ class ProductionHomeViewModel @Inject constructor(
                 assetCode = asset.assetCode,
                 operatorId = resolvedOperatorId,
                 operatorName = resolvedOperatorName,
-                originalOperatorId = asset.defaultOperatorId,
-                originalOperatorName = asset.defaultOperatorName ?: "",
-                operatorChanged = (resolvedOperatorId != asset.defaultOperatorId),
+                originalOperatorId = originalOperatorId,
+                originalOperatorName = existing?.originalOperatorName ?: asset.defaultOperatorName.orEmpty(),
+                operatorChanged = (resolvedOperatorId != originalOperatorId),
                 productId = resolvedProductId,
                 productName = resolvedProductName,
-                originalProductId = asset.defaultProductId,
-                originalProductName = asset.defaultProductName ?: "",
-                productChanged = (resolvedProductId != asset.defaultProductId),
-                originalCavities = asset.originalCavities,
-                currentCavities = currentCavities.coerceAtLeast(1),
+                originalProductId = originalProductId,
+                originalProductName = existing?.originalProductName ?: asset.defaultProductName.orEmpty(),
+                productChanged = (resolvedProductId != originalProductId),
+                originalCavities = originalCavities,
+                currentCavities = currentCavities,
                 operationMode = operationMode,
                 coolingTimeSeconds = coolingTimeSeconds,
                 cycleTimeSeconds = cycleTimeSeconds,
+                originalCoolingTimeSeconds = existing?.originalCoolingTimeSeconds ?: asset.coolingTimeSeconds,
+                originalCycleTimeSeconds = existing?.originalCycleTimeSeconds ?: asset.cycleTimeSeconds,
                 rawMaterial = selectedMaterial?.name ?: "",
                 rawMaterialOptionId = selectedMaterial?.id,
                 finalProductionWeightKg = weightKg,
@@ -437,7 +546,7 @@ class ProductionHomeViewModel @Inject constructor(
             )
 
             repository.saveMachineEntry(entry)
-            _uiState.update { it.copy(message = "تم تسجيل ماكينة ${asset.assetCode}: $quantity $unitName") }
+            _uiState.update { it.copy(entries = it.entries + (asset.id to entry)) }
             if (advance) nextWizardMachine()
         }
     }
@@ -449,19 +558,27 @@ class ProductionHomeViewModel @Inject constructor(
         durationMinutes: Int,
         notes: String = "",
         partialWeightKg: Double = 0.0,
-        currentCavities: Int? = null
+        currentCavities: Int? = null,
+        originalCavities: Int? = null,
+        coolingTimeSeconds: Double? = null,
+        cycleTimeSeconds: Double? = null
     ) {
-        viewModelScope.launch {
-            val validReportId = if (_uiState.value.currentReportId.isNotBlank()) {
-                _uiState.value.currentReportId
-            } else {
-                val rep = repository.getOrCreateShiftReport(_uiState.value.currentDate, _uiState.value.selectedShift)
-                _uiState.update { it.copy(currentReportId = rep.clientReportId) }
-                rep.clientReportId
-            }
+        val previousEntry = _uiState.value.entries[asset.id]
+        val current = currentCavities ?: previousEntry?.currentCavities ?: asset.originalCavities
+        val original = originalCavities ?: previousEntry?.originalCavities ?: asset.originalCavities
+        val cooling = coolingTimeSeconds ?: previousEntry?.coolingTimeSeconds ?: asset.coolingTimeSeconds
+        val cycle = cycleTimeSeconds ?: previousEntry?.cycleTimeSeconds ?: asset.cycleTimeSeconds
+        if (!validMachineValues(partialWeightKg, current, original, cooling, cycle)) return
+        if (durationMinutes <= 0) {
+            _uiState.update { it.copy(message = "أدخل مدة توقف أكبر من صفر") }
+            return
+        }
+        saveEntryLocally {
+            val validReportId = _uiState.value.currentReportId
 
             // 1. Add stoppage
             val stoppage = StoppageEntity(
+                id = _uiState.value.stoppages.firstOrNull { it.assetId == asset.id }?.id ?: 0,
                 clientReportId = validReportId,
                 assetId = asset.id,
                 assetCode = asset.assetCode,
@@ -471,7 +588,6 @@ class ProductionHomeViewModel @Inject constructor(
                 durationMinutes = durationMinutes,
                 actionTaken = "تم تسجيل توقف: $stoppageTypeDisplay"
             )
-            repository.addStoppage(stoppage)
 
             // 2. Add entry (with 0.0 or partial production weight if any)
             val existing = _uiState.value.entries[asset.id]
@@ -488,11 +604,13 @@ class ProductionHomeViewModel @Inject constructor(
                 productName = asset.defaultProductName ?: "",
                 originalProductId = asset.defaultProductId,
                 originalProductName = asset.defaultProductName ?: "",
-                originalCavities = asset.originalCavities,
-                currentCavities = (currentCavities ?: asset.originalCavities).coerceAtLeast(1),
+                originalCavities = original,
+                currentCavities = current,
                 operationMode = "AUTO",
-                coolingTimeSeconds = asset.coolingTimeSeconds,
-                cycleTimeSeconds = asset.cycleTimeSeconds,
+                coolingTimeSeconds = cooling,
+                cycleTimeSeconds = cycle,
+                originalCoolingTimeSeconds = asset.coolingTimeSeconds,
+                originalCycleTimeSeconds = asset.cycleTimeSeconds,
                 rawMaterial = _uiState.value.productionOptions.find { it.id == asset.defaultRawMaterialId }?.name.orEmpty(),
                 rawMaterialOptionId = asset.defaultRawMaterialId,
                 finalProductionWeightKg = partialWeightKg,
@@ -506,9 +624,22 @@ class ProductionHomeViewModel @Inject constructor(
                 packagingOptionId = asset.defaultPackagingId,
                 notes = "ماكينة متوقفة: $stoppageTypeDisplay (${durationMinutes} دقيقة)"
             )
-            repository.saveMachineEntry(entry)
-
-            _uiState.update { it.copy(message = "تم تسجيل توقف ماكينة ${asset.assetCode}: $stoppageTypeDisplay") }
+            val finalEntry = existing?.copy(
+                currentCavities = current,
+                originalCavities = original,
+                coolingTimeSeconds = cooling,
+                cycleTimeSeconds = cycle,
+                finalProductionWeightKg = partialWeightKg,
+                finalProductionQuantity = partialWeightKg,
+                finalProductionUnitId = entry.finalProductionUnitId,
+                finalProductionUnitName = "كجم",
+                notes = notes.ifBlank { entry.notes }
+            ) ?: entry.copy(notes = notes.ifBlank { entry.notes })
+            repository.saveStoppedMachine(finalEntry, stoppage)
+            _uiState.update {
+                it.copy(entries = it.entries + (asset.id to finalEntry),
+                    stoppages = it.stoppages.filterNot { old -> old.id == stoppage.id && stoppage.id != 0L } + stoppage)
+            }
             nextWizardMachine()
         }
     }

@@ -25,6 +25,7 @@ class TokenManager @Inject constructor(
         val USER_ROLE_KEY = stringPreferencesKey("user_role")
         val SELECTED_FACTORY_ID_KEY = stringPreferencesKey("selected_factory_id")
         val SELECTED_FACTORY_NAME_KEY = stringPreferencesKey("selected_factory_name")
+        val ASSIGNED_SHIFT_KEY = stringPreferencesKey("assigned_shift")
     }
 
     val accessTokenFlow: Flow<String?> = context.dataStore.data.map { it[ACCESS_TOKEN_KEY] }
@@ -36,6 +37,13 @@ class TokenManager @Inject constructor(
     suspend fun getRefreshToken(): String? = context.dataStore.data.first()[REFRESH_TOKEN_KEY]
     suspend fun getSelectedFactoryId(): String? = context.dataStore.data.first()[SELECTED_FACTORY_ID_KEY]
     suspend fun getSelectedFactoryName(): String? = context.dataStore.data.first()[SELECTED_FACTORY_NAME_KEY]
+    suspend fun getAssignedShift(): String? = context.dataStore.data.first()[ASSIGNED_SHIFT_KEY]
+
+    suspend fun saveAssignedShift(shift: String?) {
+        context.dataStore.edit { prefs ->
+            if (shift.isNullOrBlank()) prefs.remove(ASSIGNED_SHIFT_KEY) else prefs[ASSIGNED_SHIFT_KEY] = shift
+        }
+    }
 
     suspend fun saveTokens(access: String, refresh: String, phone: String, name: String, role: String) {
         context.dataStore.edit { prefs ->

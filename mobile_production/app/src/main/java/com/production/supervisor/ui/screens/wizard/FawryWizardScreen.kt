@@ -1,36 +1,27 @@
 package com.production.supervisor.ui.screens.wizard
 
-import androidx.compose.animation.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.activity.compose.BackHandler
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -38,1738 +29,474 @@ import com.production.supervisor.data.local.entity.AssetEntity
 import com.production.supervisor.data.local.entity.MachineEntryEntity
 import com.production.supervisor.data.local.entity.ProductionOptionEntity
 import com.production.supervisor.data.local.entity.StoppageEntity
-import com.production.supervisor.ui.screens.handover.HandoverDialog
 import com.production.supervisor.ui.components.ProductionOptionSelector
+import com.production.supervisor.ui.screens.handover.HandoverDialog
 import com.production.supervisor.ui.screens.home.ProductionHomeUiState
 import com.production.supervisor.ui.screens.home.ProductionHomeViewModel
 import com.production.supervisor.ui.screens.home.WizardSubStep
+import com.production.supervisor.ui.screens.home.isMachineRecorded
 import com.production.supervisor.ui.theme.*
+import java.time.DayOfWeek
+import java.time.LocalDate
+import java.math.BigDecimal
 
-private fun productionQuantitySummary(entries: Collection<MachineEntryEntity>): String =
-    entries.filter { it.finalProductionQuantity > 0.0 }
-        .groupBy { it.finalProductionUnitName.ifBlank { "كجم" } }
-        .map { (unit, rows) ->
-            val total = rows.sumOf { it.finalProductionQuantity }
-            val formatted = if (total % 1.0 == 0.0) total.toInt().toString() else "%.2f".format(total)
-            "$formatted $unit"
-        }.joinToString(" • ").ifBlank { "لا يوجد إنتاج مسجل" }
+private fun number(value: Double): String =
+    BigDecimal.valueOf(value).stripTrailingZeros().toPlainString()
 
-/**
- * الشاشة الرئيسية لنظام "ماكينة فوري / الخطوة بخطوة" (Fawry Wizard Mode)
- * تطبيق فائق البساطة ومخصص للمشرفين والعمال في بيئة المصانع:
- * 1. قاعدة "سؤال واحد وشاشة واحدة"
- * 2. الاعتماد التلقائي على إعدادات الداشبورد
- * 3. لوحة أرقام ATM ضخمة تمنع فتح كيبورد الهاتف
- * 4. ألوان وإشارات بصرية صريحة وعريضة
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun FawryWizardScreen(
-    viewModel: ProductionHomeViewModel,
-    onLogout: () -> Unit
-) {
-    val uiState by viewModel.uiState.collectAsState()
-    val snackbarHostState = remember { SnackbarHostState() }
-
-    LaunchedEffect(uiState.message) {
-        uiState.message?.let {
-            snackbarHostState.showSnackbar(it)
-            viewModel.clearMessage()
+private fun numericText(value: String): String = buildString {
+    value.forEach { char ->
+        when {
+            char in '0'..'9' -> append(char)
+            char in '٠'..'٩' -> append('0' + (char - '٠'))
+            char in '۰'..'۹' -> append('0' + (char - '۰'))
+            char in listOf('.', '٫', ',') -> append('.')
         }
     }
+}
 
+private fun ProductionHomeUiState.isRecorded(asset: AssetEntity): Boolean {
+    return isMachineRecorded(entries[asset.id], stoppages)
+}
+
+private fun quantitySummary(entries: Collection<MachineEntryEntity>): String = entries
+    .filter { it.finalProductionQuantity > 0 }
+    .groupBy { it.finalProductionUnitName.ifBlank { "كجم" } }
+    .map { (unit, rows) -> "${number(rows.sumOf { it.finalProductionQuantity })} $unit" }
+    .joinToString(" • ").ifBlank { "لا يوجد إنتاج مسجل" }
+
+private fun shiftName(shift: String): String = when (shift) {
+    "FIRST" -> "الوردية الأولى"
+    "SECOND" -> "الوردية الثانية"
+    "THIRD" -> "الوردية الثالثة"
+    else -> shift
+}
+
+private data class WorkingInput(
+    val quantity: Double,
+    val unit: ProductionOptionEntity?,
+    val currentCavities: Int,
+    val originalCavities: Int,
+    val cooling: Double,
+    val cycle: Double,
+    val material: ProductionOptionEntity?,
+    val packaging: ProductionOptionEntity?,
+    val mode: String,
+    val operatorId: Int?,
+    val productId: Int?,
+    val notes: String
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun FawryWizardScreen(viewModel: ProductionHomeViewModel, onLogout: () -> Unit) {
+    val uiState by viewModel.uiState.collectAsState()
+    val snackbar = remember { SnackbarHostState() }
+    var showMenu by remember { mutableStateOf(false) }
+    BackHandler(enabled = uiState.wizardStarted && !uiState.isSavingEntry && !uiState.isFinishingShift) {
+        when {
+            uiState.wizardSubStep == WizardSubStep.STOPPAGE -> viewModel.setWizardSubStep(WizardSubStep.STATUS)
+            uiState.wizardSubStep == WizardSubStep.SUMMARY -> viewModel.exitWizardToWelcome()
+            else -> viewModel.previousWizardMachine()
+        }
+    }
+    LaunchedEffect(uiState.message) {
+        uiState.message?.let { message ->
+            viewModel.clearMessage()
+            snackbar.showSnackbar(message)
+        }
+    }
     Scaffold(
         topBar = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(FactoryNavy)
-            ) {
+            Column {
                 TopAppBar(
                     title = {
                         Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = "نظام فوري المبسط ⚡",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 17.sp,
-                                    color = Color.White
-                                )
-                                if (uiState.factoryName.isNotBlank()) {
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Surface(
-                                        color = Color.White.copy(alpha = 0.2f),
-                                        shape = RoundedCornerShape(6.dp)
-                                    ) {
-                                        Text(
-                                            text = uiState.factoryName,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color.White,
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                                        )
-                                    }
-                                }
-                            }
-                            Text(
-                                text = "${uiState.currentDate} • ${when (uiState.selectedShift) {
-                                    "FIRST" -> "الوردية 1 (صباحية)"
-                                    "SECOND" -> "الوردية 2 (مسائية)"
-                                    "THIRD" -> "الوردية 3 (ليلية)"
-                                    else -> uiState.selectedShift
-                                }}",
-                                fontSize = 11.sp,
-                                color = Color(0xFFCBD5E1)
-                            )
+                            Text("تقرير الإنتاج", fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                            Text("${uiState.factoryName} • ${shiftName(uiState.selectedShift)}", fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     },
                     actions = {
-                        // Switch to Detailed Mode Button
-                        FilledTonalButton(
-                            onClick = { viewModel.toggleFawryMode(false) },
-                            colors = ButtonDefaults.filledTonalButtonColors(
-                                containerColor = Color.White.copy(alpha = 0.15f),
-                                contentColor = Color.White
-                            ),
-                            shape = RoundedCornerShape(8.dp),
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                            modifier = Modifier.height(34.dp)
-                        ) {
-                            Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(15.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("الوضع التفصيلي", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        }
-
-                        IconButton(onClick = { viewModel.loadData() }) {
-                            Icon(Icons.Default.Refresh, contentDescription = "تحديث", tint = Color.White)
-                        }
-                        IconButton(onClick = { viewModel.logout(onLogout) }) {
-                            Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = "خروج", tint = Color(0xFFFCA5A5))
+                        Box {
+                            IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "خيارات التقرير") }
+                            DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                                DropdownMenuItem(text = { Text("تحديث البيانات") }, onClick = { showMenu = false; viewModel.loadData() }, leadingIcon = { Icon(Icons.Default.Refresh, null) })
+                                DropdownMenuItem(text = { Text("إرسال البيانات المحفوظة") }, onClick = { showMenu = false; viewModel.retrySync() }, leadingIcon = { Icon(Icons.Default.Sync, null) })
+                                DropdownMenuItem(text = { Text("عرض كل الماكينات") }, onClick = { showMenu = false; viewModel.toggleFawryMode(false) }, leadingIcon = { Icon(Icons.Default.List, null) })
+                                DropdownMenuItem(text = { Text("تسجيل الخروج") }, onClick = { showMenu = false; viewModel.logout(onLogout) }, leadingIcon = { Icon(Icons.AutoMirrored.Filled.ExitToApp, null) })
+                            }
                         }
                     },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = FactoryNavy)
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = FactoryNavy, titleContentColor = Color.White, actionIconContentColor = Color.White)
                 )
-
-                // Machines Step Indicator Bar (only shown when wizard is started)
-                if (uiState.wizardStarted && uiState.assets.isNotEmpty()) {
-                    WizardStepBar(
-                        assets = uiState.assets,
-                        currentIndex = uiState.wizardAssetIndex,
-                        entries = uiState.entries,
-                        stoppages = uiState.stoppages,
-                        isSummary = uiState.wizardSubStep == WizardSubStep.SUMMARY,
-                        onSelectMachine = { index -> viewModel.setWizardAssetIndex(index) },
-                        onSelectSummary = { viewModel.goToWizardSummary() }
-                    )
-                }
+                if (uiState.wizardStarted && uiState.assets.isNotEmpty()) MachineProgress(uiState,
+                    onSelect = { viewModel.setWizardAssetIndex(it) }, onReview = { viewModel.goToWizardSummary() })
             }
         },
-        snackbarHost = { SnackbarHost(snackbarHostState) }
+        snackbarHost = { SnackbarHost(snackbar) },
+        containerColor = FactoryBg
     ) { padding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(FactoryBg)
-                .padding(padding)
-        ) {
-            if (!uiState.wizardStarted) {
-                // ==========================================
-                // Screen 1: Welcome / Start Shift Screen
-                // ==========================================
-                ShiftWelcomeView(
-                    uiState = uiState,
-                    onStartWizard = { viewModel.startWizard() },
-                    onSetShift = { shift -> viewModel.setShift(shift) },
-                    onOpenHandover = { viewModel.openHandoverDialog() },
-                    onAddFridayPrayer = { viewModel.addFridayPrayerStoppage() },
-                    onGoToSummary = { viewModel.goToWizardSummary() }
-                )
-            } else if (uiState.wizardSubStep == WizardSubStep.SUMMARY) {
-                // ==========================================
-                // Screen 4: Summary & Handover Screen
-                // ==========================================
-                ShiftSummaryView(
-                    uiState = uiState,
-                    onEditMachine = { index -> viewModel.setWizardAssetIndex(index) },
-                    onFinishShift = { notes -> viewModel.finishShift(notes) },
-                    onBackToMachines = { viewModel.previousWizardMachine() }
-                )
-            } else {
-                // Active Machine Step
-                val currentAsset = uiState.assets.getOrNull(uiState.wizardAssetIndex)
-                if (currentAsset != null) {
-                    val currentEntry = uiState.entries[currentAsset.id]
-                    val currentStoppages = uiState.stoppages.filter { it.assetId == currentAsset.id }
-
-                    when (uiState.wizardSubStep) {
-                        WizardSubStep.STATUS -> {
-                            // ==========================================
-                            // Screen 2: Machine Status Question Screen
-                            // ==========================================
-                            MachineStatusQuestionView(
-                                asset = currentAsset,
-                                machineIndex = uiState.wizardAssetIndex,
-                                totalMachines = uiState.assets.size,
-                                existingEntry = currentEntry,
-                                stoppages = currentStoppages,
-                                onWorkingClick = {
-                                    viewModel.setWizardSubStep(WizardSubStep.WEIGHT)
-                                },
-                                onStoppedClick = {
-                                    viewModel.setWizardSubStep(WizardSubStep.STOPPAGE)
-                                },
-                                onOpenException = {
-                                    viewModel.openExceptionDialog(currentAsset)
-                                },
+        Box(Modifier.fillMaxSize().padding(padding)) {
+            when {
+                uiState.isLoading && uiState.assets.isEmpty() -> {
+                    Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator()
+                        Spacer(Modifier.height(16.dp))
+                        Text("جاري تحميل الماكينات")
+                    }
+                }
+                !uiState.wizardStarted -> WelcomeView(uiState,
+                    onStart = { viewModel.startWizard() }, onReview = { viewModel.goToWizardSummary() },
+                    onHandover = { viewModel.openHandoverDialog() }, onFridayPrayer = { viewModel.addFridayPrayerStoppage() })
+                uiState.wizardSubStep == WizardSubStep.SUMMARY -> SummaryView(uiState,
+                    onEdit = { viewModel.setWizardAssetIndex(it) }, onFinish = { viewModel.finishShift(it) }, onRetry = { viewModel.retrySync() })
+                else -> {
+                    val asset = uiState.assets.getOrNull(uiState.wizardAssetIndex)
+                    if (asset != null) key(uiState.currentReportId, asset.id, uiState.wizardSubStep == WizardSubStep.STOPPAGE) {
+                        val entry = uiState.entries[asset.id]
+                        val stoppage = uiState.stoppages.firstOrNull { it.assetId == asset.id }
+                        if (uiState.wizardSubStep == WizardSubStep.STOPPAGE) {
+                            StoppedMachineView(asset, entry, stoppage, uiState,
+                                onBack = { viewModel.setWizardSubStep(WizardSubStep.STATUS) },
+                                onSave = { reason, duration, notes, partialKg, current, original, cooling, cycle ->
+                                    viewModel.saveFawryStoppage(asset = asset, stoppageType = reason.first,
+                                        stoppageTypeDisplay = reason.second, durationMinutes = duration, notes = notes,
+                                        partialWeightKg = partialKg, currentCavities = current, originalCavities = original,
+                                        coolingTimeSeconds = cooling, cycleTimeSeconds = cycle)
+                                })
+                        } else {
+                            WorkingMachineView(asset, entry, stoppage, uiState,
+                                onStopped = { viewModel.setWizardSubStep(WizardSubStep.STOPPAGE) },
                                 onPrevious = { viewModel.previousWizardMachine() },
-                                onNext = { viewModel.nextWizardMachine() }
-                            )
+                                onSave = { input ->
+                                    viewModel.saveFawryWorkingEntry(asset = asset, quantity = input.quantity,
+                                        finalUnit = input.unit, currentCavities = input.currentCavities,
+                                        rawMaterial = input.material, packaging = input.packaging,
+                                        coolingTimeSeconds = input.cooling, cycleTimeSeconds = input.cycle,
+                                        operationMode = input.mode, customOperatorId = input.operatorId,
+                                        customProductId = input.productId, clearOperator = input.operatorId == null,
+                                        clearProduct = input.productId == null, notes = input.notes,
+                                        originalCavities = input.originalCavities)
+                                })
                         }
-                        WizardSubStep.WEIGHT -> {
-                            // ==========================================
-                            // Screen 3-A: ATM Weight Entry Screen
-                            // ==========================================
-                            MachineWeightEntryView(
-                                asset = currentAsset,
-                                machineIndex = uiState.wizardAssetIndex,
-                                totalMachines = uiState.assets.size,
-                                options = uiState.productionOptions,
-                                initialEntry = currentEntry,
-                                isLastMachine = uiState.wizardAssetIndex == uiState.assets.size - 1,
-                                onSaveWeight = { quantity, unit, cavities, material, packaging, cooling, cycle, mode ->
-                                    viewModel.saveFawryWorkingEntry(
-                                        asset = currentAsset,
-                                        quantity = quantity,
-                                        finalUnit = unit,
-                                        currentCavities = cavities,
-                                        rawMaterial = material,
-                                        packaging = packaging,
-                                        coolingTimeSeconds = cooling,
-                                        cycleTimeSeconds = cycle,
-                                        operationMode = mode
-                                    )
-                                },
-                                onBack = { viewModel.setWizardSubStep(WizardSubStep.STATUS) }
-                            )
-                        }
-                        WizardSubStep.STOPPAGE -> {
-                            // ==========================================
-                            // Screen 3-B: Fast One-Tap Stoppage Screen
-                            // ==========================================
-                            MachineStoppageEntryView(
-                                asset = currentAsset,
-                                machineIndex = uiState.wizardAssetIndex,
-                                totalMachines = uiState.assets.size,
-                                initialCurrentCavities = currentEntry?.currentCavities ?: currentAsset.originalCavities,
-                                isLastMachine = uiState.wizardAssetIndex == uiState.assets.size - 1,
-                                onSaveStoppage = { reasonCode, reasonDisplay, durationMinutes, notes, partialWeight, cavities ->
-                                    viewModel.saveFawryStoppage(
-                                        asset = currentAsset,
-                                        stoppageType = reasonCode,
-                                        stoppageTypeDisplay = reasonDisplay,
-                                        durationMinutes = durationMinutes,
-                                        notes = notes,
-                                        partialWeightKg = partialWeight,
-                                        currentCavities = cavities
-                                    )
-                                },
-                                onBack = { viewModel.setWizardSubStep(WizardSubStep.STATUS) }
-                            )
-                        }
-                        WizardSubStep.SUMMARY -> {
-                            // Handled above
-                        }
-                    }
-                } else {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("لا توجد ماكينات مسجلة في هذا المصنع", color = FactoryTextMuted)
-                    }
+                    } else Text("لا توجد ماكينات في هذا المصنع", Modifier.align(Alignment.Center), color = FactoryTextSecondary)
                 }
             }
+        }
+    }
+    if (uiState.isHandoverDialogVisible && uiState.pendingHandover != null) {
+        HandoverDialog(pendingReport = uiState.pendingHandover!!,
+            onDismiss = { viewModel.closeHandoverDialog() }, onConfirm = { viewModel.confirmHandover(it) })
+    }
+}
 
-            // Exceptions Dialog
-            uiState.exceptionAssetForEdit?.let { asset ->
-                MachineExceptionDialog(
-                    asset = asset,
-                    operators = uiState.operators,
-                    products = uiState.products,
-                    currentOperatorId = if (uiState.entries[asset.id] != null) uiState.entries[asset.id]!!.operatorId else asset.defaultOperatorId,
-                    currentProductId = if (uiState.entries[asset.id] != null) uiState.entries[asset.id]!!.productId else asset.defaultProductId,
-                    currentCavities = uiState.entries[asset.id]?.currentCavities ?: asset.originalCavities,
-                    onDismiss = { viewModel.closeExceptionDialog() },
-                    onConfirm = { opId, prodId, cavs ->
-                        // Save or update existing entry with exception values
-                        val existing = uiState.entries[asset.id]
-                        viewModel.saveFawryWorkingEntry(
-                            asset = asset,
-                            quantity = existing?.finalProductionQuantity ?: existing?.finalProductionWeightKg ?: 0.0,
-                            finalUnit = uiState.productionOptions.find { it.id == (existing?.finalProductionUnitId ?: asset.defaultFinalUnitId) }
-                                ?: uiState.productionOptions.firstOrNull { it.category == "FINAL_UNIT" && it.name == "كجم" },
-                            currentCavities = cavs,
-                            rawMaterial = uiState.productionOptions.find { it.id == (existing?.rawMaterialOptionId ?: asset.defaultRawMaterialId) },
-                            packaging = uiState.productionOptions.find { it.id == (existing?.packagingOptionId ?: asset.defaultPackagingId) },
-                            coolingTimeSeconds = existing?.coolingTimeSeconds ?: asset.coolingTimeSeconds,
-                            cycleTimeSeconds = existing?.cycleTimeSeconds ?: asset.cycleTimeSeconds,
-                            operationMode = existing?.operationMode ?: "AUTO",
-                            customOperatorId = opId,
-                            customProductId = prodId,
-                            clearOperator = opId == null,
-                            clearProduct = prodId == null,
-                            advance = false
-                        )
-                    }
-                )
-            }
-
-            // Handover Dialog
-            if (uiState.isHandoverDialogVisible && uiState.pendingHandover != null) {
-                HandoverDialog(
-                    pendingReport = uiState.pendingHandover!!,
-                    onDismiss = { viewModel.closeHandoverDialog() },
-                    onConfirm = { notes -> viewModel.confirmHandover(notes) }
+@Composable
+private fun MachineProgress(uiState: ProductionHomeUiState, onSelect: (Int) -> Unit, onReview: () -> Unit) {
+    val count = uiState.assets.count { uiState.isRecorded(it) }
+    Column(Modifier.fillMaxWidth().background(FactorySurface).padding(horizontal = 12.dp, vertical = 6.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("تم تسجيل $count من ${uiState.assets.size}", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            TextButton(onClick = onReview, enabled = !uiState.isSavingEntry) { Text("مراجعة التقرير") }
+        }
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 4.dp)) {
+            itemsIndexed(uiState.assets, key = { _, asset -> asset.id }) { index, asset ->
+                FilterChip(
+                    selected = uiState.wizardSubStep != WizardSubStep.SUMMARY && index == uiState.wizardAssetIndex,
+                    onClick = { onSelect(index) }, enabled = !uiState.isSavingEntry && !uiState.isReportFinished && !uiState.isFinishingShift,
+                    label = { Text(asset.assetCode, fontSize = 14.sp) },
+                    leadingIcon = if (uiState.isRecorded(asset)) { { Icon(Icons.Default.CheckCircle, null, tint = FactoryGreenDark, modifier = Modifier.size(18.dp)) } } else null
                 )
             }
         }
     }
 }
 
-/**
- * شريط تتبع الماكينات في أعلى الشاشة:
- * يعرض رقماً ملوناً لكل ماكينة:
- * - أخضر: مسجلة وشغالة
- * - أحمر/برتقالي: مسجلة كعطل
- * - رمادي: لم تسجل بعد
- * مع إمكانية الضغط على أي ماكينة للانتقال إليها مباشرة
- */
 @Composable
-private fun WizardStepBar(
-    assets: List<AssetEntity>,
-    currentIndex: Int,
-    entries: Map<Int, MachineEntryEntity>,
-    stoppages: List<StoppageEntity>,
-    isSummary: Boolean,
-    onSelectMachine: (Int) -> Unit,
-    onSelectSummary: () -> Unit
-) {
-    Surface(
-        color = Color(0xFF0F172A),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = if (isSummary) "ملخص الوردية والتسليم" else "الماكينة ${currentIndex + 1} من ${assets.size}",
-                    color = Color.White,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold
-                )
-
-                val recordedCount = entries.size
-                Text(
-                    text = "تم تسجيل $recordedCount من ${assets.size}",
-                    color = if (recordedCount == assets.size) Color(0xFF34D399) else Color(0xFF94A3B8),
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
+private fun WelcomeView(uiState: ProductionHomeUiState, onStart: () -> Unit, onReview: () -> Unit, onHandover: () -> Unit, onFridayPrayer: () -> Unit) {
+    val count = uiState.assets.count { uiState.isRecorded(it) }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+        Text(uiState.currentDate, fontSize = 16.sp, color = FactoryTextSecondary)
+        uiState.pendingHandover?.let { report ->
+            Card(colors = CardDefaults.cardColors(containerColor = FactoryLightOrange)) {
+                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("وردية سابقة بانتظار الاستلام", fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                    Text("${report.supervisorName} • ${report.shiftDisplay}")
+                    OutlinedButton(onClick = onHandover, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) { Text("مراجعة واستلام الوردية") }
+                }
             }
+        }
+        Card(colors = CardDefaults.cardColors(containerColor = FactorySurface), border = BorderStroke(1.dp, FactoryCardBorder)) {
+            Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text(if (uiState.isReportFinished) "تم حفظ تقرير الوردية" else "تسجيل إنتاج الوردية", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                uiState.currentUser?.name?.takeIf { it.isNotBlank() }?.let { Text("المشرف: $it", color = FactoryTextSecondary) }
+                Text("اكتب كمية إنتاج الماكينة ثم اضغط حفظ والتالي. إعدادات الماكينة جاهزة تلقائياً.", fontSize = 18.sp, color = FactoryTextSecondary)
+                Text("$count من ${uiState.assets.size} ماكينة مسجلة", fontSize = 18.sp, fontWeight = FontWeight.Medium)
+                Button(onClick = if (uiState.isReportFinished) onReview else onStart,
+                    enabled = uiState.assets.isNotEmpty() && !uiState.isLoading,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 62.dp), shape = RoundedCornerShape(12.dp)) {
+                    Text(if (uiState.isReportFinished) "عرض التقرير" else if (count > 0) "استكمال التقرير" else "بدء التقرير", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                }
+                if (count > 0 && !uiState.isReportFinished) OutlinedButton(onClick = onReview, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) { Text("مراجعة الماكينات المسجلة", fontSize = 17.sp) }
+            }
+        }
+        val isFriday = runCatching { LocalDate.parse(uiState.currentDate).dayOfWeek == DayOfWeek.FRIDAY }.getOrDefault(false)
+        if (isFriday && !uiState.isReportFinished) OutlinedButton(onClick = onFridayPrayer, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) { Text("تسجيل توقف صلاة الجمعة: 60 دقيقة", fontSize = 16.sp) }
+        if (uiState.assets.isEmpty() && !uiState.isLoading) Text("لا توجد ماكينات متاحة. استخدم تحديث البيانات من قائمة الخيارات.", color = FactoryTextSecondary)
+    }
+}
 
-            Spacer(modifier = Modifier.height(6.dp))
+@Composable
+private fun MachineHeading(asset: AssetEntity, uiState: ProductionHomeUiState) {
+    Text(asset.productionTitle, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = FactoryNavy)
+    Text("الماكينة ${uiState.wizardAssetIndex + 1} من ${uiState.assets.size} • ${asset.assetCode}", fontSize = 15.sp, color = FactoryTextSecondary)
+}
 
-            // Horizontal Chips
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                itemsIndexed(assets) { index, asset ->
-                    val isCurrent = !isSummary && index == currentIndex
-                    val isRecorded = entries[asset.id] != null
-                    val hasStoppage = stoppages.any { it.assetId == asset.id }
-
-                    val bgColor = when {
-                        isCurrent -> FactoryNavyLight
-                        hasStoppage -> FactoryOrange.copy(alpha = 0.25f)
-                        isRecorded -> FactoryGreen.copy(alpha = 0.25f)
-                        else -> Color(0xFF1E293B)
+@Composable
+private fun WorkingMachineView(asset: AssetEntity, initial: MachineEntryEntity?, stoppage: StoppageEntity?, uiState: ProductionHomeUiState,
+    onStopped: () -> Unit, onPrevious: () -> Unit, onSave: (WorkingInput) -> Unit) {
+    fun options(category: String, savedId: Int?, savedName: String, kgPerUnit: Double? = null): List<ProductionOptionEntity> {
+        val available = uiState.productionOptions.filter { it.category == category }
+        return if (savedId != null && savedName.isNotBlank() && available.none { it.id == savedId })
+            available + ProductionOptionEntity(savedId, category, savedName, kgPerUnit) else available
+    }
+    val units = options("FINAL_UNIT", initial?.finalProductionUnitId, initial?.finalProductionUnitName.orEmpty(),
+        initial?.let { if (it.finalProductionQuantity > 0 && it.finalProductionWeightKg > 0) it.finalProductionWeightKg / it.finalProductionQuantity else null })
+    val materials = options("RAW_MATERIAL", initial?.rawMaterialOptionId, initial?.rawMaterial.orEmpty())
+    val packagingOptions = options("PACKAGING", initial?.packagingOptionId, initial?.packagingType.orEmpty())
+    var quantity by rememberSaveable { mutableStateOf(initial?.let { number(it.finalProductionQuantity.takeIf { q -> q > 0 } ?: it.finalProductionWeightKg) }?.takeIf { it != "0" } ?: "") }
+    var unit by remember { mutableStateOf(units.find { it.id == (initial?.finalProductionUnitId ?: asset.defaultFinalUnitId) } ?: units.find { it.name == (initial?.finalProductionUnitName ?: asset.defaultFinalUnitName ?: "كجم") } ?: units.firstOrNull()) }
+    var material by remember { mutableStateOf(materials.find { it.id == (initial?.rawMaterialOptionId ?: asset.defaultRawMaterialId) }) }
+    var packaging by remember { mutableStateOf(packagingOptions.find { it.id == (initial?.packagingOptionId ?: asset.defaultPackagingId) }) }
+    var current by rememberSaveable { mutableStateOf((initial?.currentCavities ?: asset.originalCavities).toString()) }
+    var original by rememberSaveable { mutableStateOf((initial?.originalCavities ?: asset.originalCavities).toString()) }
+    var cooling by rememberSaveable { mutableStateOf(number(initial?.coolingTimeSeconds ?: asset.coolingTimeSeconds)) }
+    var cycle by rememberSaveable { mutableStateOf(number(initial?.cycleTimeSeconds ?: asset.cycleTimeSeconds)) }
+    var mode by rememberSaveable { mutableStateOf(initial?.operationMode ?: "AUTO") }
+    var notes by rememberSaveable { mutableStateOf(initial?.notes ?: "") }
+    var operatorId by rememberSaveable { mutableStateOf(if (initial != null) initial.operatorId else asset.defaultOperatorId) }
+    var productId by rememberSaveable { mutableStateOf(if (initial != null) initial.productId else asset.defaultProductId) }
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    var exceptionVisible by remember { mutableStateOf(false) }
+    val unitName = unit?.name ?: initial?.finalProductionUnitName ?: asset.defaultFinalUnitName ?: "كجم"
+    val validSettings = current.toIntOrNull()?.let { it > 0 } == true && original.toIntOrNull()?.let { it > 0 } == true &&
+        cooling.toDoubleOrNull()?.let { it.isFinite() && it >= 0 } == true && cycle.toDoubleOrNull()?.let { it.isFinite() && it >= 0 } == true
+    val validQuantity = quantity.toDoubleOrNull()?.let { it.isFinite() && it > 0 } == true
+    Column(Modifier.fillMaxSize()) {
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            MachineHeading(asset, uiState)
+            OutlinedButton(onClick = onStopped, enabled = !uiState.isSavingEntry, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                Icon(Icons.Default.PauseCircle, null, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(8.dp))
+                Text(if (stoppage != null) "تعديل التوقف المسجل: ${stoppage.durationMinutes} دقيقة" else "الماكينة توقفت؟ تسجيل توقف", fontSize = 16.sp)
+            }
+            Text("كمية الإنتاج ($unitName)", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            AtmNumpad(quantity, { quantity = it }, unitName, enabled = !uiState.isSavingEntry)
+            Card(colors = CardDefaults.cardColors(containerColor = FactorySurface), border = BorderStroke(1.dp, FactoryCardBorder)) {
+                Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("اللقم الحالية: $current  •  الأصلية: $original", fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                    Text("الدورة: $cycle ثانية  •  التبريد: $cooling ثانية", fontSize = 15.sp, color = FactoryTextSecondary)
+                    val productName = uiState.products.find { it.id == productId }?.name ?: if (productId == initial?.productId) initial?.productName else asset.defaultProductName
+                    val operatorName = uiState.operators.find { it.id == operatorId }?.name ?: if (operatorId == initial?.operatorId) initial?.operatorName else asset.defaultOperatorName
+                    Text("المنتج: ${productName?.ifBlank { "غير محدد" } ?: "غير محدد"} • العامل: ${operatorName?.ifBlank { "غير محدد" } ?: "غير محدد"}", fontSize = 15.sp, color = FactoryTextSecondary)
+                    TextButton(onClick = { expanded = !expanded }, enabled = !uiState.isSavingEntry, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                        Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.Tune, null)
+                        Spacer(Modifier.width(8.dp)); Text(if (expanded) "إخفاء الإعدادات" else "تعديل إعدادات الماكينة", fontSize = 17.sp)
                     }
-
-                    val borderColor = when {
-                        isCurrent -> Color.White
-                        hasStoppage -> FactoryOrange
-                        isRecorded -> FactoryGreen
-                        else -> Color(0xFF334155)
-                    }
-
-                    val textColor = when {
-                        isCurrent -> Color.White
-                        hasStoppage -> FactoryOrange
-                        isRecorded -> Color(0xFF34D399)
-                        else -> Color(0xFF94A3B8)
-                    }
-
-                    Surface(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { onSelectMachine(index) },
-                        color = bgColor,
-                        shape = RoundedCornerShape(8.dp),
-                        border = androidx.compose.foundation.BorderStroke(if (isCurrent) 2.dp else 1.dp, borderColor)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "م ${index + 1}",
-                                fontSize = 12.sp,
-                                fontWeight = if (isCurrent) FontWeight.Black else FontWeight.Bold,
-                                color = textColor
-                            )
-                            if (isRecorded) {
-                                Spacer(modifier = Modifier.width(3.dp))
-                                Icon(
-                                    imageVector = if (hasStoppage) Icons.Default.Warning else Icons.Default.Check,
-                                    contentDescription = null,
-                                    tint = textColor,
-                                    modifier = Modifier.size(13.dp)
-                                )
-                            }
+                    if (expanded) {
+                        TechnicalFields(asset, current, { current = it }, original, { original = it }, cooling, { cooling = it }, cycle, { cycle = it },
+                            defaultCooling = initial?.originalCoolingTimeSeconds ?: asset.coolingTimeSeconds,
+                            defaultCycle = initial?.originalCycleTimeSeconds ?: asset.cycleTimeSeconds)
+                        OutlinedButton(onClick = { exceptionVisible = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) { Text("تغيير العامل أو المنتج", fontSize = 17.sp) }
+                        if (units.isNotEmpty()) ProductionOptionSelector("وحدة الإنتاج", units, unit, { unit = it }, allowNone = false)
+                        ProductionOptionSelector("الخامة", materials, material, { material = it }, allowNone = false)
+                        ProductionOptionSelector("العبوة", packagingOptions, packaging, { packaging = it }, allowNone = false)
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            FilterChip(selected = mode == "AUTO", onClick = { mode = "AUTO" }, label = { Text("تلقائي", fontSize = 16.sp) })
+                            FilterChip(selected = mode == "MANUAL", onClick = { mode = "MANUAL" }, label = { Text("يدوي", fontSize = 16.sp) })
                         }
+                        OutlinedTextField(notes, { notes = it }, label = { Text("ملاحظات (اختياري)") }, modifier = Modifier.fillMaxWidth(), minLines = 2)
                     }
                 }
+            }
+            if (!validSettings) Text("راجع اللقم والدورة والتبريد. اللقم أكبر من صفر والأزمنة صفر أو أكثر.", color = FactoryRed, fontSize = 15.sp)
+        }
+        SaveFooter(
+            label = if (uiState.wizardAssetIndex == uiState.assets.lastIndex) "حفظ ومراجعة التقرير" else "حفظ والتالي",
+            enabled = validQuantity && validSettings && !uiState.isSavingEntry,
+            saving = uiState.isSavingEntry,
+            onSave = { onSave(WorkingInput(quantity.toDouble(), unit, current.toInt(), original.toInt(), cooling.toDouble(), cycle.toDouble(), material, packaging, mode, operatorId, productId, notes)) },
+            previousEnabled = uiState.wizardAssetIndex > 0 && !uiState.isSavingEntry, onPrevious = onPrevious
+        )
+    }
+    if (exceptionVisible) MachineExceptionDialog(asset = asset, operators = uiState.operators, products = uiState.products,
+        currentOperatorId = operatorId, currentProductId = productId, currentCavities = current.toIntOrNull() ?: asset.originalCavities,
+        onDismiss = { exceptionVisible = false }, onConfirm = { op, product, cavities ->
+            operatorId = op; productId = product; current = cavities.toString(); exceptionVisible = false
+        })
+}
 
-                // Summary Chip
-                item {
-                    Surface(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { onSelectSummary() },
-                        color = if (isSummary) FactoryGreen else Color(0xFF1E293B),
-                        shape = RoundedCornerShape(8.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, if (isSummary) Color.White else Color(0xFF334155))
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                Icons.Default.Assessment,
-                                contentDescription = null,
-                                tint = if (isSummary) Color.White else Color(0xFF94A3B8),
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "الملخص",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (isSummary) Color.White else Color(0xFF94A3B8)
-                            )
-                        }
-                    }
-                }
+@Composable
+private fun TechnicalFields(asset: AssetEntity, current: String, onCurrent: (String) -> Unit, original: String, onOriginal: (String) -> Unit,
+    cooling: String, onCooling: (String) -> Unit, cycle: String, onCycle: (String) -> Unit,
+    defaultCooling: Double = asset.coolingTimeSeconds, defaultCycle: Double = asset.cycleTimeSeconds) {
+    Text("القيم الافتراضية: ${asset.originalCavities} لقمة • دورة ${number(defaultCycle)} ث • تبريد ${number(defaultCooling)} ث", fontSize = 14.sp, color = FactoryTextSecondary)
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        NumericField("اللقم الحالية", current, onCurrent, Modifier.weight(1f), integer = true, positive = true)
+        NumericField("اللقم الأصلية", original, onOriginal, Modifier.weight(1f), integer = true, positive = true)
+    }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        NumericField("الدورة (ثانية)", cycle, onCycle, Modifier.weight(1f))
+        NumericField("التبريد (ثانية)", cooling, onCooling, Modifier.weight(1f))
+    }
+    TextButton(onClick = { onCurrent(asset.originalCavities.toString()); onOriginal(asset.originalCavities.toString()); onCooling(number(defaultCooling)); onCycle(number(defaultCycle)) }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+        Icon(Icons.Default.Restore, null); Spacer(Modifier.width(8.dp)); Text("إعادة القيم الافتراضية", fontSize = 16.sp)
+    }
+}
+
+@Composable
+private fun NumericField(label: String, value: String, onChange: (String) -> Unit, modifier: Modifier = Modifier, integer: Boolean = false, positive: Boolean = false) {
+    val numeric = if (integer) value.toIntOrNull()?.toDouble() else value.toDoubleOrNull()
+    val valid = numeric != null && numeric.isFinite() && if (positive) numeric > 0 else numeric >= 0
+    OutlinedTextField(value = value, onValueChange = { text -> onChange(numericText(text).let { if (integer) it.filter(Char::isDigit) else it }) },
+        label = { Text(label, fontSize = 14.sp) }, modifier = modifier, singleLine = true, isError = !valid,
+        keyboardOptions = KeyboardOptions(keyboardType = if (integer) KeyboardType.Number else KeyboardType.Decimal), shape = RoundedCornerShape(10.dp))
+}
+
+@Composable
+private fun SaveFooter(label: String, enabled: Boolean, saving: Boolean, onSave: () -> Unit, previousEnabled: Boolean = false, onPrevious: (() -> Unit)? = null) {
+    Surface(color = FactorySurface, shadowElevation = 4.dp) {
+        Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (onPrevious != null && previousEnabled) OutlinedButton(onClick = onPrevious, modifier = Modifier.heightIn(min = 58.dp), shape = RoundedCornerShape(12.dp)) { Text("السابق", fontSize = 16.sp) }
+            Button(onClick = onSave, enabled = enabled, modifier = Modifier.weight(1f).heightIn(min = 58.dp), shape = RoundedCornerShape(12.dp)) {
+                if (saving) { CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp); Spacer(Modifier.width(10.dp)) }
+                Text(if (saving) "جاري الحفظ" else label, fontSize = 19.sp, fontWeight = FontWeight.Bold)
             }
         }
     }
 }
 
-/**
- * الشاشة 1: شاشة البدء والترحيب بالوردية (Shift Welcome)
- */
 @Composable
-private fun ShiftWelcomeView(
-    uiState: ProductionHomeUiState,
-    onStartWizard: () -> Unit,
-    onSetShift: (String) -> Unit,
-    onOpenHandover: () -> Unit,
-    onAddFridayPrayer: () -> Unit,
-    onGoToSummary: () -> Unit
-) {
-    val scrollState = rememberScrollState()
-    val recordedCount = uiState.entries.size
-    val totalMachines = uiState.assets.size
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(scrollState)
-            .padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        // Handover Banner Alert if pending from previous shift
-        uiState.pendingHandover?.let { pending ->
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onOpenHandover() },
-                colors = CardDefaults.cardColors(containerColor = FactoryLightOrange),
-                shape = RoundedCornerShape(16.dp),
-                border = androidx.compose.foundation.BorderStroke(1.5.dp, FactoryOrange)
-            ) {
-                Row(
-                    modifier = Modifier.padding(14.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(46.dp)
-                            .background(FactoryOrange.copy(alpha = 0.2f), CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(Icons.Outlined.Handshake, contentDescription = null, tint = FactoryOrange, modifier = Modifier.size(26.dp))
-                    }
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "وردية بانتظار استلامك!",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp,
-                            color = FactoryDark
-                        )
-                        Text(
-                            text = "الزميل المسلّم: ${pending.supervisorName} (${pending.shiftDisplay})",
-                            fontSize = 12.sp,
-                            color = FactoryTextSecondary
-                        )
-                    }
-                    Button(
-                        onClick = onOpenHandover,
-                        colors = ButtonDefaults.buttonColors(containerColor = FactoryGreen),
-                        shape = RoundedCornerShape(10.dp)
-                    ) {
-                        Text("استلام", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color.White)
-                    }
-                }
-            }
-        }
-
-        // Welcome Hero Card
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = FactorySurface),
-            border = androidx.compose.foundation.BorderStroke(1.dp, FactoryCardBorder),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(20.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                // Supervisor Avatar Circle
-                Box(
-                    modifier = Modifier
-                        .size(72.dp)
-                        .background(
-                            Brush.linearGradient(listOf(FactoryNavy, FactoryNavyLight)),
-                            CircleShape
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Person,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(38.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                val userName = uiState.currentUser?.name?.ifBlank { null } ?: "المستخدم"
-                Text(
-                    text = "مرحباً بك: $userName",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = FactoryDark
-                )
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                Surface(
-                    color = FactorySurfaceVariant,
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Text(
-                        text = "مصنع: ${uiState.factoryName.ifBlank { "المصنع" }}",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = FactoryTextSecondary,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // Single Shift Badge - إظهار وردية العمل المخصصة فقط دون إرباك المستخدم بباقي الورادي
-                val shiftName = when (uiState.selectedShift) {
-                    "FIRST" -> "الوردية الأولى (صباحية)"
-                    "SECOND" -> "الوردية الثانية (مسائية)"
-                    "THIRD" -> "الوردية الثالثة (ليلية)"
-                    else -> uiState.selectedShift
-                }
-                Surface(
-                    color = FactoryLightGreen,
-                    shape = RoundedCornerShape(12.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, FactoryGreen.copy(alpha = 0.5f))
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("⏰", fontSize = 16.sp)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "وردية العمل: $shiftName",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = FactoryGreenDark
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                // Factory Machines Counter Summary
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(FactorySurfaceVariant)
-                        .padding(vertical = 12.dp, horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text("إجمالي الماكينات", fontSize = 12.sp, color = FactoryTextMuted)
-                        Text("$totalMachines ماكينة", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = FactoryDark)
-                    }
-
-                    VerticalDivider(modifier = Modifier.height(30.dp), color = FactoryCardBorder)
-
-                    Column {
-                        Text("تم تسجيلها", fontSize = 12.sp, color = FactoryTextMuted)
-                        Text(
-                            "$recordedCount ماكينة",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (recordedCount == totalMachines) FactoryGreen else FactoryOrange
-                        )
-                    }
-
-                    VerticalDivider(modifier = Modifier.height(30.dp), color = FactoryCardBorder)
-
-                    Column {
-                        Text("إجمالي الإنتاج", fontSize = 12.sp, color = FactoryTextMuted)
-                        Text(productionQuantitySummary(uiState.entries.values), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = FactoryTeal)
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(24.dp))
-
-                // Giant Green Start Button
-                Button(
-                    onClick = onStartWizard,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(64.dp)
-                        .shadow(elevation = 6.dp, shape = RoundedCornerShape(16.dp)),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = FactoryGreen),
-                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PlayArrow,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(28.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = if (recordedCount == 0) "🚀 ابدأ تسجيل ماكينات الوردية الآن" else "متابعة تسجيل الماكينات ($recordedCount / $totalMachines)",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Black,
-                            color = Color.White
-                        )
-                    }
-                }
-
-                if (recordedCount > 0) {
-                    Spacer(modifier = Modifier.height(10.dp))
-                    OutlinedButton(
-                        onClick = onGoToSummary,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Icon(Icons.Default.Assessment, contentDescription = null, tint = FactoryNavy)
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("عرض ملخص الوردية والتسليم النهائي", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = FactoryNavy)
-                    }
-                }
-            }
-        }
-
-        // Quick Friday Prayer Card (يظهر يوم الجمعة فقط)
-        val isFriday = try {
-            java.time.LocalDate.now().dayOfWeek == java.time.DayOfWeek.FRIDAY
-        } catch (_: Exception) {
-            false
-        }
-        if (isFriday) {
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onAddFridayPrayer() },
-                shape = RoundedCornerShape(14.dp),
-                color = FactoryLightTeal,
-                border = androidx.compose.foundation.BorderStroke(1.dp, FactoryTeal.copy(alpha = 0.5f))
-            ) {
-                Row(
-                    modifier = Modifier.padding(14.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("🕌", fontSize = 24.sp)
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "تسجيل إيقاف صلاة الجمعة لجميع الماكينات",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = FactoryTeal
-                        )
-                        Text(
-                            text = "إيقاف جماعي لمدة 60 دقيقة بلمسة واحدة",
-                            fontSize = 11.sp,
-                            color = FactoryTextSecondary
-                        )
-                    }
-                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = FactoryTeal)
-                }
-            }
-        }
+private fun StoppedMachineView(asset: AssetEntity, initial: MachineEntryEntity?, stoppage: StoppageEntity?, uiState: ProductionHomeUiState,
+    onBack: () -> Unit, onSave: (Pair<String, String>, Int, String, Double, Int, Int, Double, Double) -> Unit) {
+    val reasons = buildList {
+        add("MACHINE_BREAKDOWN" to "عطل ماكينة")
+        add("POWER_OUTAGE" to "انقطاع كهرباء")
+        add("COOLING_HEATING" to "تبريد أو حرارة")
+        add("MOLD_CHANGE" to "تغيير اسطمبة")
+        add("MAINTENANCE" to "صيانة")
+        add("RAW_MATERIAL" to "نقص خامات")
+        if (runCatching { LocalDate.parse(uiState.currentDate).dayOfWeek == DayOfWeek.FRIDAY }.getOrDefault(false)) add("FRIDAY_PRAYER" to "صلاة الجمعة")
+        add("OTHER" to "سبب آخر")
     }
-}
-
-/**
- * الشاشة 2: السؤال الرئيسي للماكينة (Machine Status Question)
- * سؤال واحد وواضح: "ما هي حالة الماكينة في ورديتك؟"
- * زر أخضر عملاق: الماكينة شغالة ومطابقة تمام
- * زر أحمر عريض: الماكينة كانت عطلانة / متوقفة
- */
-@Composable
-private fun MachineStatusQuestionView(
-    asset: AssetEntity,
-    machineIndex: Int,
-    totalMachines: Int,
-    existingEntry: MachineEntryEntity?,
-    stoppages: List<StoppageEntity>,
-    onWorkingClick: () -> Unit,
-    onStoppedClick: () -> Unit,
-    onOpenException: () -> Unit,
-    onPrevious: () -> Unit,
-    onNext: () -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.SpaceBetween
-    ) {
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            // Machine Big Profile Card
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = FactorySurface),
-                border = androidx.compose.foundation.BorderStroke(1.5.dp, FactoryCardBorder),
-                elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(18.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    // Machine Number Tag
-                    Surface(
-                        color = FactoryNavy,
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Text(
-                            text = "ماكينة: ${asset.assetCode}",
-                            fontSize = 24.sp,
-                            fontWeight = FontWeight.Black,
-                            color = Color.White,
-                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)
-                        )
+    var reasonCode by rememberSaveable { mutableStateOf(stoppage?.stoppageType ?: "MACHINE_BREAKDOWN") }
+    var duration by rememberSaveable { mutableStateOf((stoppage?.durationMinutes ?: 60).toString()) }
+    var notes by rememberSaveable { mutableStateOf(stoppage?.description ?: "") }
+    var partial by rememberSaveable { mutableStateOf(initial?.finalProductionWeightKg?.takeIf { it > 0 }?.let { number(it) } ?: "") }
+    var hasProduction by rememberSaveable { mutableStateOf((initial?.finalProductionWeightKg ?: 0.0) > 0) }
+    var settings by rememberSaveable { mutableStateOf(false) }
+    var current by rememberSaveable { mutableStateOf((initial?.currentCavities ?: asset.originalCavities).toString()) }
+    var original by rememberSaveable { mutableStateOf((initial?.originalCavities ?: asset.originalCavities).toString()) }
+    var cooling by rememberSaveable { mutableStateOf(number(initial?.coolingTimeSeconds ?: asset.coolingTimeSeconds)) }
+    var cycle by rememberSaveable { mutableStateOf(number(initial?.cycleTimeSeconds ?: asset.cycleTimeSeconds)) }
+    val validSettings = current.toIntOrNull()?.let { it > 0 } == true && original.toIntOrNull()?.let { it > 0 } == true &&
+        cooling.toDoubleOrNull()?.let { it.isFinite() && it >= 0 } == true && cycle.toDoubleOrNull()?.let { it.isFinite() && it >= 0 } == true
+    val validPartial = !hasProduction || partial.toDoubleOrNull()?.let { it.isFinite() && it > 0 } == true
+    Column(Modifier.fillMaxSize()) {
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            MachineHeading(asset, uiState)
+            OutlinedButton(onClick = onBack, enabled = !uiState.isSavingEntry, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("العودة لتسجيل الإنتاج", fontSize = 16.sp) }
+            Text("سبب التوقف", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            reasons.chunked(2).forEach { row ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    row.forEach { reason ->
+                        FilterChip(selected = reasonCode == reason.first, onClick = { reasonCode = reason.first },
+                            modifier = Modifier.weight(1f).heightIn(min = 52.dp), label = { Text(reason.second, fontSize = 16.sp) })
                     }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    Text(
-                        text = asset.productionTitle,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = FactoryDark,
-                        textAlign = TextAlign.Center
-                    )
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    // Machine Default Info Tags (المنتج المعتاد والعامل المعتاد)
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(FactorySurfaceVariant)
-                            .padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("📦", fontSize = 16.sp)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("المنتج المعتاد: ", fontSize = 13.sp, color = FactoryTextMuted)
-                            Text(
-                                text = asset.defaultProductName ?: "غير محدد",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = FactoryDark,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("👤", fontSize = 16.sp)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("العامل المعتاد: ", fontSize = 13.sp, color = FactoryTextMuted)
-                            Text(
-                                text = asset.defaultOperatorName ?: "غير محدد",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = FactoryDark,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("⚙️", fontSize = 16.sp)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("اللقم المشغلة: ", fontSize = 13.sp, color = FactoryTextMuted)
-                            Text(
-                                text = "${asset.originalCavities} لقمة",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = FactoryDark
-                            )
-                        }
-                    }
-
-                    // Existing Recorded State Banner (if already recorded)
-                    if (existingEntry != null) {
-                        Spacer(modifier = Modifier.height(10.dp))
-                        val isStoppage = stoppages.isNotEmpty()
-                        Surface(
-                            color = if (isStoppage) FactoryLightOrange else FactoryLightGreen,
-                            shape = RoundedCornerShape(10.dp),
-                            border = androidx.compose.foundation.BorderStroke(
-                                1.dp,
-                                if (isStoppage) FactoryOrange else FactoryGreen
-                            )
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = if (isStoppage) "⚠️ مسجلة كعطل: ${stoppages.first().stoppageTypeDisplay}" else "✅ مسجلة بوزن: ${existingEntry.finalProductionWeightKg} كجم",
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (isStoppage) FactoryOrangeDark else FactoryGreenDark
-                                )
-                            }
-                        }
-                    }
+                    if (row.size == 1) Spacer(Modifier.weight(1f))
                 }
             }
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            // The Main Big Question
-            Text(
-                text = "ما هي حالة الماكينة في ورديتك؟",
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Black,
-                color = FactoryDark,
-                textAlign = TextAlign.Center
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // 1. Giant Green Button: شغالة ومطابقة تمام
-            Button(
-                onClick = onWorkingClick,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(72.dp)
-                    .shadow(elevation = 6.dp, shape = RoundedCornerShape(18.dp)),
-                shape = RoundedCornerShape(18.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = FactoryGreen),
-                elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    Text("✅", fontSize = 28.sp)
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column {
-                        Text(
-                            text = "الماكينة شغالة ومطابقة تمام",
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.Black,
-                            color = Color.White
-                        )
-                        Text(
-                            text = "اضغط لكتابة وزن الإنتاج بالكيلو",
-                            fontSize = 11.sp,
-                            color = Color(0xFFD1FAE5)
-                        )
-                    }
+            Text("مدة التوقف", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(15 to "15 دقيقة", 30 to "30 دقيقة", 60 to "ساعة").forEach { (minutes, text) ->
+                    FilterChip(selected = duration == minutes.toString(), onClick = { duration = minutes.toString() }, label = { Text(text) }, modifier = Modifier.weight(1f).heightIn(min = 48.dp))
                 }
             }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // 2. Giant Red Button: الماكينة كانت عطلانة / متوقفة
-            Button(
-                onClick = onStoppedClick,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(72.dp)
-                    .shadow(elevation = 4.dp, shape = RoundedCornerShape(18.dp)),
-                shape = RoundedCornerShape(18.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = FactoryRed),
-                elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    Text("❌", fontSize = 28.sp)
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column {
-                        Text(
-                            text = "الماكينة كانت عطلانة / متوقفة",
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.Black,
-                            color = Color.White
-                        )
-                        Text(
-                            text = "اضغط لاختيار سبب التوقف بلمسة واحدة",
-                            fontSize = 11.sp,
-                            color = Color(0xFFFEE2E2)
-                        )
-                    }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(120 to "ساعتان", 240 to "4 ساعات", 480 to "8 ساعات").forEach { (minutes, text) ->
+                    FilterChip(selected = duration == minutes.toString(), onClick = { duration = minutes.toString() }, label = { Text(text) }, modifier = Modifier.weight(1f).heightIn(min = 48.dp))
                 }
             }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // 3. Small Optional Exception Button: تم تغيير الاسطمبة أو العامل
-            OutlinedButton(
-                onClick = onOpenException,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(46.dp),
-                shape = RoundedCornerShape(12.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, FactoryNavyLight)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Settings,
-                    contentDescription = null,
-                    tint = FactoryNavy,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "⚙️ تم تغيير الاسطمبة أو العامل المشغل",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = FactoryNavy
-                )
+            NumericField("مدة التوقف بالدقائق", duration, { duration = it }, Modifier.fillMaxWidth(), integer = true, positive = true)
+            if ((duration.toIntOrNull() ?: 0) > 1440) Text("مدة التوقف لا تزيد عن 24 ساعة (1440 دقيقة)", color = FactoryRed)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("يوجد إنتاج قبل التوقف", fontSize = 18.sp, modifier = Modifier.weight(1f))
+                Switch(checked = hasProduction, onCheckedChange = { hasProduction = it })
             }
+            if (hasProduction) {
+                Text("وزن الإنتاج قبل التوقف (كجم)", fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                AtmNumpad(partial, { partial = it }, enabled = !uiState.isSavingEntry)
+            }
+            TextButton(onClick = { settings = !settings }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text(if (settings) "إخفاء الإعدادات" else "تعديل اللقم والدورة والتبريد", fontSize = 17.sp) }
+            if (settings) TechnicalFields(asset, current, { current = it }, original, { original = it }, cooling, { cooling = it }, cycle, { cycle = it },
+                defaultCooling = initial?.originalCoolingTimeSeconds ?: asset.coolingTimeSeconds,
+                defaultCycle = initial?.originalCycleTimeSeconds ?: asset.cycleTimeSeconds)
+            OutlinedTextField(notes, { notes = it }, label = { Text("ملاحظات التوقف (اختياري)") }, modifier = Modifier.fillMaxWidth(), minLines = 2)
+            if (!validSettings) Text("راجع قيم اللقم والدورة والتبريد", color = FactoryRed)
         }
-
-        // Bottom Navigation Row (السابق / التالي)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 4.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            TextButton(
-                onClick = onPrevious,
-                modifier = Modifier.height(44.dp)
-            ) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, tint = FactoryTextMuted)
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                    text = if (machineIndex == 0) "رجوع للبدء" else "السابق",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = FactoryTextMuted
-                )
-            }
-
-            if (machineIndex < totalMachines - 1) {
-                TextButton(
-                    onClick = onNext,
-                    modifier = Modifier.height(44.dp)
-                ) {
-                    Text("تخطي للماكينة التالية", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = FactoryNavy)
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, tint = FactoryNavy)
-                }
-            }
-        }
-    }
-}
-
-/**
- * الشاشة 3-أ: إدخال الوزن (لوحة أرقام فوري / ATM)
- * تظهر عند اختيار "الماكينة شغالة ومطابقة تمام"
- */
-@Composable
-private fun MachineWeightEntryView(
-    asset: AssetEntity,
-    machineIndex: Int,
-    totalMachines: Int,
-    options: List<ProductionOptionEntity>,
-    initialEntry: MachineEntryEntity?,
-    isLastMachine: Boolean,
-    onSaveWeight: (Double, ProductionOptionEntity?, Int, ProductionOptionEntity?, ProductionOptionEntity?, Double, Double, String) -> Unit,
-    onBack: () -> Unit
-) {
-    val finalUnits = options.filter { it.category == "FINAL_UNIT" }
-    val materials = options.filter { it.category == "RAW_MATERIAL" }
-    val packagingOptions = options.filter { it.category == "PACKAGING" }
-    var weightString by remember(asset.id) {
-        val initialWeight = initialEntry?.finalProductionQuantity ?: initialEntry?.finalProductionWeightKg ?: 0.0
-        val initial = if (initialWeight > 0.0) {
-            if (initialWeight % 1.0 == 0.0) initialWeight.toInt().toString() else initialWeight.toString()
-        } else ""
-        mutableStateOf(initial)
-    }
-    var cavities by remember(asset.id, initialEntry?.id) { mutableIntStateOf((initialEntry?.currentCavities ?: asset.originalCavities).coerceAtLeast(1)) }
-    var selectedUnit by remember(asset.id, finalUnits, initialEntry?.finalProductionUnitId) {
-        mutableStateOf(finalUnits.find { it.id == initialEntry?.finalProductionUnitId }
-            ?: finalUnits.find { it.id == asset.defaultFinalUnitId }
-            ?: finalUnits.find { it.name in setOf("كجم", "كيلو", "كيلوجرام") }
-            ?: finalUnits.firstOrNull())
-    }
-    var selectedMaterial by remember(asset.id, materials, initialEntry?.rawMaterialOptionId) {
-        mutableStateOf(materials.find { it.id == initialEntry?.rawMaterialOptionId }
-            ?: materials.find { it.id == asset.defaultRawMaterialId })
-    }
-    var selectedPackaging by remember(asset.id, packagingOptions, initialEntry?.packagingOptionId) {
-        mutableStateOf(packagingOptions.find { it.id == initialEntry?.packagingOptionId }
-            ?: packagingOptions.find { it.id == asset.defaultPackagingId })
-    }
-    var coolingText by remember(asset.id, initialEntry?.id) { mutableStateOf((initialEntry?.coolingTimeSeconds ?: asset.coolingTimeSeconds).takeIf { it > 0 }?.toString() ?: "") }
-    var cycleText by remember(asset.id, initialEntry?.id) { mutableStateOf((initialEntry?.cycleTimeSeconds ?: asset.cycleTimeSeconds).takeIf { it > 0 }?.toString() ?: "") }
-    var operationMode by remember(asset.id, initialEntry?.id) { mutableStateOf(initialEntry?.operationMode ?: "AUTO") }
-    var showAdvanced by remember(asset.id) { mutableStateOf(false) }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "رجوع", tint = FactoryDark) }
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("ماكينة: ${asset.assetCode}", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = FactoryDark)
-                Text("البيانات التلقائية جاهزة؛ أدخل المتغير فقط", fontSize = 12.sp, color = FactoryTextSecondary)
-            }
-            Box(Modifier.size(48.dp))
-        }
-
-        Card(colors = CardDefaults.cardColors(containerColor = FactorySurface), shape = RoundedCornerShape(14.dp)) {
-            Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("الإعدادات المعتمدة", fontWeight = FontWeight.Bold, color = FactoryNavy)
-                Text("العامل: ${asset.defaultOperatorName?.ifBlank { "غير محدد" } ?: "غير محدد"}  •  المنتج: ${asset.defaultProductName?.ifBlank { "غير محدد" } ?: "غير محدد"}", fontSize = 12.sp, color = FactoryTextSecondary)
-                Text("اللقم الأصلي: ${asset.originalCavities}  •  مستهدف الدورة: ${asset.targetCycleProduction} ${asset.targetCycleUnitName.orEmpty()}", fontSize = 12.sp, color = FactoryTextSecondary)
-            }
-        }
-
-        ProductionOptionSelector("وحدة كمية الإنتاج", finalUnits, selectedUnit, { selectedUnit = it }, allowNone = false)
-        AtmNumpad(value = weightString, onValueChange = { weightString = it }, unit = selectedUnit?.name ?: "اختر الوحدة")
-
-        Card(colors = CardDefaults.cardColors(containerColor = FactorySurface), shape = RoundedCornerShape(14.dp)) {
-            Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("بيانات الماكينة", fontWeight = FontWeight.Bold, color = FactoryNavy)
-                Text("عدد اللقم الحالية", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedButton(onClick = { if (cavities > 1) cavities-- }, modifier = Modifier.weight(1f).height(48.dp)) { Text("−", fontSize = 22.sp) }
-                    Surface(color = FactorySurfaceVariant, shape = RoundedCornerShape(10.dp), modifier = Modifier.weight(1f)) {
-                        Text(cavities.toString(), Modifier.padding(10.dp), textAlign = TextAlign.Center, fontSize = 20.sp, fontWeight = FontWeight.Black, color = FactoryNavy)
-                    }
-                    OutlinedButton(onClick = { cavities++ }, modifier = Modifier.weight(1f).height(48.dp)) { Text("+", fontSize = 22.sp) }
-                }
-                if (materials.isNotEmpty()) ProductionOptionSelector("الخامة", materials, selectedMaterial, { selectedMaterial = it }, noneLabel = "غير محددة")
-                if (packagingOptions.isNotEmpty()) ProductionOptionSelector("العبوة", packagingOptions, selectedPackaging, { selectedPackaging = it }, noneLabel = "غير محددة")
-                Text("حالة التشغيل", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    listOf("AUTO" to "أوتو", "MANUAL" to "يدوي").forEach { (value, label) ->
-                        Button(onClick = { operationMode = value }, modifier = Modifier.weight(1f).height(48.dp), colors = ButtonDefaults.buttonColors(containerColor = if (operationMode == value) FactoryGreen else FactorySurfaceVariant, contentColor = if (operationMode == value) Color.White else FactoryDark)) { Text(label, fontWeight = FontWeight.Bold) }
-                    }
-                }
-                TextButton(onClick = { showAdvanced = !showAdvanced }, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (showAdvanced) "إخفاء تعديل الأزمنة" else "تعديل أزمنة التبريد والدورة (اختياري)")
-                }
-                AnimatedVisibility(showAdvanced) {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(value = coolingText, onValueChange = { coolingText = it }, modifier = Modifier.fillMaxWidth(), label = { Text("زمن التبريد بالثواني") }, supportingText = { Text("الافتراضي: ${asset.coolingTimeSeconds} ث") }, keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal), singleLine = true)
-                        OutlinedTextField(value = cycleText, onValueChange = { cycleText = it }, modifier = Modifier.fillMaxWidth(), label = { Text("زمن الدورة بالثواني") }, supportingText = { Text("الافتراضي: ${asset.cycleTimeSeconds} ث") }, keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal), singleLine = true)
-                    }
-                }
-            }
-        }
-
-        // Giant Action Button: حفظ والانتقال للماكينة التالية
-        val enteredQuantity = weightString.toDoubleOrNull() ?: 0.0
-        val isValid = enteredQuantity > 0.0 && selectedUnit != null
-
-        Button(
-            onClick = {
-                if (isValid) {
-                    onSaveWeight(enteredQuantity, selectedUnit, cavities, selectedMaterial, selectedPackaging, coolingText.toDoubleOrNull() ?: asset.coolingTimeSeconds, cycleText.toDoubleOrNull() ?: asset.cycleTimeSeconds, operationMode)
-                }
-            },
-            enabled = isValid,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(64.dp)
-                .shadow(elevation = if (isValid) 6.dp else 0.dp, shape = RoundedCornerShape(16.dp)),
-            shape = RoundedCornerShape(16.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = FactoryGreen,
-                disabledContainerColor = Color(0xFFCBD5E1)
-            )
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
-            ) {
-                Text(
-                    text = if (isLastMachine) "✅ حفظ ومراجعة الوردية ➔" else "التالي: ماكينة ${machineIndex + 2} ➔",
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Black,
-                    color = Color.White
-                )
-            }
-        }
-    }
-}
-
-/**
- * الشاشة 3-ب: تسجيل العطل بضغطة واحدة (في حالة اختيار عطلانة)
- * اختيار سريع ومصور لسبب التوقف والمدة بنقرة واحدة
- */
-@Composable
-private fun MachineStoppageEntryView(
-    asset: AssetEntity,
-    machineIndex: Int,
-    totalMachines: Int,
-    initialCurrentCavities: Int,
-    isLastMachine: Boolean,
-    onSaveStoppage: (reasonCode: String, reasonDisplay: String, durationMinutes: Int, notes: String, partialWeight: Double, currentCavities: Int) -> Unit,
-    onBack: () -> Unit
-) {
-    var selectedReason by remember { mutableStateOf("MACHINE_BREAKDOWN") }
-    var selectedReasonDisplay by remember { mutableStateOf("عطل ميكانيكي / كهرباء") }
-    var selectedDurationMinutes by remember { mutableStateOf(60) }
-    var partialWeightString by remember { mutableStateOf("") }
-    var showWeightInput by remember { mutableStateOf(false) }
-    var currentCavities by remember(asset.id) { mutableIntStateOf(initialCurrentCavities.coerceAtLeast(1)) }
-
-    val isFriday = try {
-        java.time.LocalDate.now().dayOfWeek == java.time.DayOfWeek.FRIDAY
-    } catch (_: Exception) {
-        false
-    }
-
-    val stoppageReasons = remember(isFriday) {
-        buildList {
-            add(Triple("MACHINE_BREAKDOWN", "عطل ميكانيكي / كهرباء", "🔧"))
-            add(Triple("COOLING_HEATING", "عطل تبريد / حرارة", "❄️"))
-            add(Triple("MOLD_CHANGE", "تغيير اسطمبة / صيانة", "🔄"))
-            if (isFriday) {
-                add(Triple("FRIDAY_PRAYER", "صلاة الجمعة / راحة", "🕌"))
-            }
-            add(Triple("RAW_MATERIAL", "نقص خامات / مواد", "📦"))
-            add(Triple("OTHER", "عطل فني آخر", "⚠️"))
-        }
-    }
-
-    val durationPresets = listOf(
-        15 to "ربع ساعة (15 د)",
-        30 to "نصف ساعة (30 د)",
-        60 to "ساعة كاملة (60 د)",
-        120 to "ساعتين (120 د)",
-        480 to "الوردية كاملة (8 س)"
-    )
-
-    val scrollState = rememberScrollState()
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(scrollState)
-            .padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.SpaceBetween
-    ) {
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            // Header Bar
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "رجوع", tint = FactoryDark)
-                }
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = "ماكينة: ${asset.assetCode}",
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = FactoryDark
-                    )
-                    Text(
-                        text = "ما هو سبب توقف الماكينة؟",
-                        fontSize = 13.sp,
-                        color = FactoryRed,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-                Box(modifier = Modifier.size(48.dp))
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            Text("عدد اللقم الحالية", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = FactoryDark, modifier = Modifier.fillMaxWidth())
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                OutlinedButton(onClick = { if (currentCavities > 1) currentCavities-- }, modifier = Modifier.weight(1f).height(48.dp)) { Text("−", fontSize = 22.sp) }
-                Surface(color = FactorySurfaceVariant, shape = RoundedCornerShape(10.dp), modifier = Modifier.weight(1f)) {
-                    Text(currentCavities.toString(), Modifier.padding(10.dp), textAlign = TextAlign.Center, fontSize = 20.sp, fontWeight = FontWeight.Black, color = FactoryNavy)
-                }
-                OutlinedButton(onClick = { currentCavities++ }, modifier = Modifier.weight(1f).height(48.dp)) { Text("+", fontSize = 22.sp) }
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // 1. Stoppage Reason Cards Grid (2 columns)
-            Text(
-                text = "1. اختر سبب العطل:",
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                color = FactoryDark,
-                modifier = Modifier.fillMaxWidth()
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                val chunked = stoppageReasons.chunked(2)
-                chunked.forEach { rowItems ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        rowItems.forEach { (code, label, icon) ->
-                            val isSelected = selectedReason == code
-                            Surface(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(60.dp)
-                                    .clickable {
-                                        selectedReason = code
-                                        selectedReasonDisplay = label
-                                    },
-                                shape = RoundedCornerShape(12.dp),
-                                color = if (isSelected) FactoryLightRed else FactorySurface,
-                                border = androidx.compose.foundation.BorderStroke(
-                                    if (isSelected) 2.dp else 1.dp,
-                                    if (isSelected) FactoryRed else FactoryCardBorder
-                                )
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .padding(horizontal = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(icon, fontSize = 20.sp)
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = label,
-                                        fontSize = 12.sp,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                        color = if (isSelected) FactoryRed else FactoryDark,
-                                        maxLines = 2
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(18.dp))
-
-            // 2. Duration Selector
-            Text(
-                text = "2. مدة التوقف التقريبية:",
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                color = FactoryDark,
-                modifier = Modifier.fillMaxWidth()
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                durationPresets.forEach { (mins, label) ->
-                    val isSelected = selectedDurationMinutes == mins
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(46.dp)
-                            .clickable { selectedDurationMinutes = mins },
-                        shape = RoundedCornerShape(10.dp),
-                        color = if (isSelected) FactoryNavy else FactorySurface,
-                        border = androidx.compose.foundation.BorderStroke(
-                            1.dp,
-                            if (isSelected) FactoryNavy else FactoryCardBorder
-                        )
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 14.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = label,
-                                fontSize = 13.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                color = if (isSelected) Color.White else FactoryDark
-                            )
-                            if (isSelected) {
-                                Icon(Icons.Default.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
-                            }
-                        }
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // 3. Optional partial weight produced before breakdown
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { showWeightInput = !showWeightInput },
-                shape = RoundedCornerShape(10.dp),
-                color = FactorySurfaceVariant
-            ) {
-                Row(
-                    modifier = Modifier.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = "⚖️ هل أنتجت الماكينة أي وزن قبل التوقف؟",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = FactoryTextSecondary
-                    )
-                    Text(
-                        text = if (showWeightInput) "إخفاء" else "نعم، سجل وزن",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = FactoryPrimaryBlue
-                    )
-                }
-            }
-
-            if (showWeightInput) {
-                Spacer(modifier = Modifier.height(8.dp))
-                AtmNumpad(
-                    value = partialWeightString,
-                    onValueChange = { partialWeightString = it },
-                    unit = "كجم منتج قبل العطل"
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(20.dp))
-
-        // Giant Action Button: حفظ العطل والتالي
-        Button(
-            onClick = {
-                val partialWeight = partialWeightString.toDoubleOrNull() ?: 0.0
-                onSaveStoppage(
-                    selectedReason,
-                    selectedReasonDisplay,
-                    selectedDurationMinutes,
-                    "",
-                    partialWeight,
-                    currentCavities
-                )
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(64.dp)
-                .shadow(elevation = 6.dp, shape = RoundedCornerShape(16.dp)),
-            shape = RoundedCornerShape(16.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = FactoryOrange)
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
-            ) {
-                Text(
-                    text = if (isLastMachine) "✅ حفظ العطل ومراجعة الوردية ➔" else "حفظ العطل والتالي: ماكينة ${machineIndex + 2} ➔",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Black,
-                    color = Color.White
-                )
-            }
-        }
-    }
-}
-
-/**
- * الشاشة 4: شاشة المراجعة والتسليم النهائي (Shift Summary & Handover)
- */
-@Composable
-private fun ShiftSummaryView(
-    uiState: ProductionHomeUiState,
-    onEditMachine: (Int) -> Unit,
-    onFinishShift: (String) -> Unit,
-    onBackToMachines: () -> Unit
-) {
-    val scrollState = rememberScrollState()
-    val totalMachines = uiState.assets.size
-    val recordedCount = uiState.entries.size
-    val stoppageCount = uiState.stoppages.mapNotNull { it.assetId }.distinct().size
-    val workingCount = (recordedCount - stoppageCount).coerceAtLeast(0)
-
-    var handoverNotes by remember { mutableStateOf("") }
-    var isSubmitted by remember { mutableStateOf(false) }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(scrollState)
-            .padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        // Celebration Banner
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = FactoryLightGreen),
-            border = androidx.compose.foundation.BorderStroke(1.5.dp, FactoryGreen)
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(20.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text("🎉", fontSize = 48.sp)
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = "الله ينور عليك! تم التسجيل بنجاح 👏",
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Black,
-                    color = FactoryGreenDark
-                )
-                Text(
-                    text = "تم تسجيل ماكينات الوردية بالكامل بنجاح",
-                    fontSize = 13.sp,
-                    color = FactoryTextSecondary
-                )
-            }
-        }
-
-        // Summary Statistics Card
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(18.dp),
-            colors = CardDefaults.cardColors(containerColor = FactorySurface),
-            border = androidx.compose.foundation.BorderStroke(1.dp, FactoryCardBorder)
-        ) {
-            Column(modifier = Modifier.padding(18.dp)) {
-                Text(
-                    text = "📊 ملخص الوردية السريع:",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = FactoryDark
-                )
-                Spacer(modifier = Modifier.height(14.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    SummaryMetricPill(
-                        label = "المسجل",
-                        value = "$recordedCount من $totalMachines",
-                        color = FactoryNavy
-                    )
-                    SummaryMetricPill(
-                        label = "الإنتاج",
-                        value = productionQuantitySummary(uiState.entries.values),
-                        color = FactoryGreen
-                    )
-                    SummaryMetricPill(
-                        label = "عطلانة",
-                        value = "$stoppageCount ماكينة",
-                        color = if (stoppageCount > 0) FactoryRed else FactoryGreen
-                    )
-                }
-            }
-        }
-
-        // Machine Review List (Expandable or list with 1-tap edit)
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(18.dp),
-            colors = CardDefaults.cardColors(containerColor = FactorySurface),
-            border = androidx.compose.foundation.BorderStroke(1.dp, FactoryCardBorder)
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    text = "مراجعة الماكينات (اضغط على أي ماكينة لتعديلها):",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = FactoryDark
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-
-                uiState.assets.forEachIndexed { index, asset ->
-                    val entry = uiState.entries[asset.id]
-                    val stoppage = uiState.stoppages.find { it.assetId == asset.id }
-
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp)
-                            .clickable { onEditMachine(index) },
-                        shape = RoundedCornerShape(10.dp),
-                        color = FactorySurfaceVariant
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 10.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = if (stoppage != null) "❌" else if (entry != null) "✅" else "⚪",
-                                    fontSize = 16.sp
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Column {
-                                    Text(
-                                        text = "ماكينة: ${asset.assetCode}",
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = FactoryDark
-                                    )
-                                    Text(
-                                        text = if (stoppage != null) "عطل: ${stoppage.stoppageTypeDisplay} (${stoppage.durationMinutes} د)" else if (entry != null) "إنتاج: ${entry.finalProductionQuantity} ${entry.finalProductionUnitName}" else "لم تسجل بعد",
-                                        fontSize = 11.sp,
-                                        color = if (stoppage != null) FactoryOrangeDark else if (entry != null) FactoryGreenDark else FactoryTextMuted
-                                    )
-                                }
-                            }
-
-                            TextButton(onClick = { onEditMachine(index) }) {
-                                Text("تعديل", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = FactoryPrimaryBlue)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Handover Section
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(18.dp),
-            colors = CardDefaults.cardColors(containerColor = FactorySurface),
-            border = androidx.compose.foundation.BorderStroke(1.dp, FactoryCardBorder)
-        ) {
-            Column(modifier = Modifier.padding(18.dp)) {
-                val nextShiftName = when (uiState.selectedShift) {
-                    "FIRST" -> "الوردية الثانية (مسائية)"
-                    "SECOND" -> "الوردية الثالثة (ليلية)"
-                    "THIRD" -> "الوردية الأولى (صباحية)"
-                    else -> "الوردية التالية"
-                }
-
-                Text(
-                    text = "🤝 تسليم الوردية للزميل المستلم:",
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = FactoryDark
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "الوردية المستلمة: $nextShiftName",
-                    fontSize = 12.sp,
-                    color = FactoryTextSecondary
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Quick Notes Tags
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    listOf("الماكينات مستقرة ونظيفة", "تم فحص الاسطمبات", "جاهزة للتشغيل").forEach { tag ->
-                        Surface(
-                            modifier = Modifier
-                                .clickable {
-                                    handoverNotes = if (handoverNotes.isBlank()) tag else "$handoverNotes • $tag"
-                                },
-                            shape = RoundedCornerShape(8.dp),
-                            color = FactorySurfaceVariant
-                        ) {
-                            Text(
-                                text = "+ $tag",
-                                fontSize = 11.sp,
-                                color = FactoryTextSecondary,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                OutlinedTextField(
-                    value = handoverNotes,
-                    onValueChange = { handoverNotes = it },
-                    placeholder = { Text("اكتب ملاحظات تسليم الوردية (اختياري)...", fontSize = 13.sp) },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    minLines = 2
-                )
-            }
-        }
-
-        // Giant Green Handover Button
-        Button(
-            onClick = {
-                onFinishShift(handoverNotes)
-                isSubmitted = true
-            },
-            enabled = !isSubmitted,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(68.dp)
-                .shadow(elevation = 6.dp, shape = RoundedCornerShape(18.dp)),
-            shape = RoundedCornerShape(18.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = FactoryNavy),
-            elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
-            ) {
-                Icon(
-                    Icons.Outlined.AssignmentTurnedIn,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(28.dp)
-                )
-                Spacer(modifier = Modifier.width(10.dp))
-                Text(
-                    text = if (isSubmitted) "تم التسليم بنجاح ✅" else "🤝 تسليم الوردية للزميل المستلم",
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Black,
-                    color = Color.White
-                )
-            }
-        }
-
-        TextButton(onClick = onBackToMachines) {
-            Text("العودة لمراجعة الماكينات", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = FactoryTextMuted)
-        }
+        SaveFooter(label = if (uiState.wizardAssetIndex == uiState.assets.lastIndex) "حفظ ومراجعة التقرير" else "حفظ والتالي",
+            enabled = duration.toIntOrNull()?.let { it > 0 && it <= 1440 } == true && validSettings && validPartial && !uiState.isSavingEntry,
+            saving = uiState.isSavingEntry,
+            onSave = { onSave(reasons.find { it.first == reasonCode } ?: (reasonCode to (stoppage?.stoppageTypeDisplay ?: "سبب آخر")), duration.toInt(), notes,
+                if (hasProduction) partial.toDouble() else 0.0, current.toInt(), original.toInt(), cooling.toDouble(), cycle.toDouble()) })
     }
 }
 
 @Composable
-private fun SummaryMetricPill(
-    label: String,
-    value: String,
-    color: Color
-) {
-    Surface(
-        color = color.copy(alpha = 0.1f),
-        shape = RoundedCornerShape(12.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.3f))
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(label, fontSize = 11.sp, color = FactoryTextMuted)
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(value, fontSize = 15.sp, fontWeight = FontWeight.Black, color = color)
+private fun SummaryView(uiState: ProductionHomeUiState, onEdit: (Int) -> Unit, onFinish: (String) -> Unit, onRetry: () -> Unit) {
+    val count = uiState.assets.count { uiState.isRecorded(it) }
+    val incomplete = uiState.assets.indices.filter { !uiState.isRecorded(uiState.assets[it]) }
+    var notes by rememberSaveable(uiState.currentReportId) { mutableStateOf("") }
+    Column(Modifier.fillMaxSize()) {
+        LazyColumn(Modifier.weight(1f).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(vertical = 16.dp)) {
+            item {
+                Text(if (uiState.isReportFinished) "تم حفظ التقرير" else "مراجعة التقرير", fontSize = 25.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(8.dp))
+                Text("${uiState.currentDate} • ${shiftName(uiState.selectedShift)}", fontSize = 16.sp, color = FactoryTextSecondary)
+            }
+            item {
+                Card(colors = CardDefaults.cardColors(containerColor = FactorySurface), border = BorderStroke(1.dp, FactoryCardBorder)) {
+                    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("الماكينات المسجلة: $count من ${uiState.assets.size}", fontSize = 19.sp, fontWeight = FontWeight.Bold)
+                        Text("الإنتاج: ${quantitySummary(uiState.entries.values)}", fontSize = 17.sp, color = FactoryGreenDark)
+                        if (uiState.isReportFinished) {
+                            Text(if (uiState.isReportSynced) "تم إرسال التقرير إلى الإدارة" else "محفوظ على الهاتف. بانتظار إرسال التقرير عند توفر الاتصال.", fontSize = 17.sp, color = if (uiState.isReportSynced) FactoryGreenDark else FactoryOrangeDark)
+                            Text(if (uiState.reportStatus == "CONFIRMED") "تم اعتماد استلام الوردية" else "بانتظار استلام الوردية التالية", fontSize = 16.sp, color = FactoryTextSecondary)
+                            if (!uiState.isReportSynced) OutlinedButton(onClick = onRetry, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) { Text("إعادة إرسال التقرير", fontSize = 17.sp) }
+                        } else if (incomplete.isNotEmpty()) Text("متبقي ${incomplete.size} ماكينة. سجل الإنتاج أو التوقف قبل إنهاء التقرير.", fontSize = 17.sp, color = FactoryOrangeDark)
+                    }
+                }
+            }
+            itemsIndexed(uiState.assets, key = { _, asset -> asset.id }) { index, asset ->
+                val entry = uiState.entries[asset.id]
+                val stops = uiState.stoppages.filter { it.assetId == asset.id }
+                OutlinedCard(onClick = { onEdit(index) }, enabled = !uiState.isReportFinished && !uiState.isFinishingShift && !uiState.isSavingEntry, modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Text(asset.productionTitle, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                            if (!uiState.isReportFinished) Text(if (uiState.isRecorded(asset)) "تعديل" else "تسجيل", fontSize = 16.sp, color = FactoryPrimaryBlue)
+                        }
+                        if (entry != null && entry.finalProductionQuantity > 0) Text("الإنتاج: ${number(entry.finalProductionQuantity)} ${entry.finalProductionUnitName}", fontSize = 17.sp, color = FactoryGreenDark)
+                        if (stops.isNotEmpty()) Text("توقف: ${stops.joinToString("، ") { "${it.stoppageTypeDisplay} (${it.durationMinutes} دقيقة)" }}", fontSize = 16.sp, color = FactoryOrangeDark)
+                        if (!uiState.isRecorded(asset)) Text("لم يتم التسجيل", fontSize = 16.sp, color = FactoryTextMuted)
+                        if (entry != null) Text("اللقم الحالية: ${entry.currentCavities} • الأصلية: ${entry.originalCavities}\nالدورة: ${number(entry.cycleTimeSeconds)} ث • التبريد: ${number(entry.coolingTimeSeconds)} ث", fontSize = 15.sp, color = FactoryTextSecondary)
+                    }
+                }
+            }
+            if (!uiState.isReportFinished) item {
+                OutlinedTextField(value = notes, onValueChange = { notes = it }, label = { Text("ملاحظات تسليم الوردية (اختياري)") }, modifier = Modifier.fillMaxWidth(), minLines = 2)
+            }
+        }
+        if (!uiState.isReportFinished) {
+            if (incomplete.isNotEmpty()) SaveFooter("استكمال الماكينات المتبقية", !uiState.isSavingEntry, false, { onEdit(incomplete.first()) })
+            else SaveFooter("حفظ التقرير وتسليم الوردية", uiState.assets.isNotEmpty() && !uiState.isSavingEntry && !uiState.isFinishingShift, uiState.isFinishingShift, { onFinish(notes) })
         }
     }
 }

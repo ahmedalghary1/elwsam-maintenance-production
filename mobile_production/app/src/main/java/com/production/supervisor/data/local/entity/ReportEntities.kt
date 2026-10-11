@@ -4,10 +4,11 @@ import androidx.room.Entity
 import androidx.room.PrimaryKey
 import androidx.room.ForeignKey
 import androidx.room.Index
+import androidx.room.ColumnInfo
 
 @Entity(
     tableName = "shift_reports",
-    indices = [Index(value = ["reportDate", "shift"])]
+    indices = [Index(value = ["reportDate", "shift"]), Index(value = ["factoryId", "reportDate", "shift"])]
 )
 data class ShiftReportEntity(
     @PrimaryKey val clientReportId: String,
@@ -15,12 +16,14 @@ data class ShiftReportEntity(
     val reportDate: String, // YYYY-MM-DD
     val startedAtDevice: String,
     val completedAtDevice: String? = null,
-    val status: String = "PENDING_HANDOVER", // PENDING_HANDOVER, CONFIRMED
+    val status: String = "DRAFT", // DRAFT, PENDING_HANDOVER, CONFIRMED
     val generalNotes: String = "",
     val isSynced: Boolean = false,
     val handoverConfirmedAt: String? = null,
     val handoverToSupervisorName: String? = null,
-    val handoverNotes: String? = null
+    val handoverNotes: String? = null,
+    val factoryId: Int? = null,
+    @ColumnInfo(defaultValue = "0") val localRevision: Long = 0
 )
 
 @Entity(
@@ -50,6 +53,8 @@ data class MachineEntryEntity(
     val operationMode: String = "AUTO", // AUTO, MANUAL
     val coolingTimeSeconds: Double = 0.0,
     val cycleTimeSeconds: Double = 0.0,
+    @ColumnInfo(defaultValue = "0.0") val originalCoolingTimeSeconds: Double = 0.0,
+    @ColumnInfo(defaultValue = "0.0") val originalCycleTimeSeconds: Double = 0.0,
     val rawMaterial: String = "",
     val rawMaterialOptionId: Int? = null,
     val finalProductionWeightKg: Double = 0.0,

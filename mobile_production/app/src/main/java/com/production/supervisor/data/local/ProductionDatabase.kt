@@ -17,13 +17,25 @@ import com.production.supervisor.data.local.entity.*
         MachineEntryEntity::class,
         StoppageEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class ProductionDatabase : RoomDatabase() {
     abstract fun productionDao(): ProductionDao
 
     companion object {
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE machine_entries ADD COLUMN originalCoolingTimeSeconds REAL NOT NULL DEFAULT 0.0")
+                db.execSQL("ALTER TABLE machine_entries ADD COLUMN originalCycleTimeSeconds REAL NOT NULL DEFAULT 0.0")
+                db.execSQL("UPDATE machine_entries SET originalCoolingTimeSeconds = coolingTimeSeconds, originalCycleTimeSeconds = cycleTimeSeconds")
+                db.execSQL("ALTER TABLE shift_reports ADD COLUMN factoryId INTEGER")
+                db.execSQL("ALTER TABLE shift_reports ADD COLUMN localRevision INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_shift_reports_factoryId_reportDate_shift ON shift_reports(factoryId, reportDate, shift)")
+                db.execSQL("UPDATE shift_reports SET status = 'DRAFT' WHERE completedAtDevice IS NULL AND status = 'PENDING_HANDOVER'")
+            }
+        }
+
         val MIGRATION_3_4 = object : Migration(3, 4) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE assets ADD COLUMN defaultRawMaterialId INTEGER")
