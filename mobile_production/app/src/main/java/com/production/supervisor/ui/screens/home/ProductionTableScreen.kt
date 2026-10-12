@@ -1,6 +1,9 @@
 package com.production.supervisor.ui.screens.home
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -11,7 +14,15 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.input.KeyboardType
 import com.production.supervisor.data.local.entity.*
 import com.production.supervisor.ui.screens.handover.HandoverDialog
@@ -21,6 +32,24 @@ import org.json.JSONObject
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProductionTableScreen(viewModel: ProductionHomeViewModel, onLogout: () -> Unit) {
+    MaterialTheme(colorScheme = lightColorScheme(
+        primary = Color(0xFF171717), onPrimary = Color.White,
+        secondary = Color(0xFF404040), onSecondary = Color.White,
+        secondaryContainer = Color(0xFFEAEAEA), onSecondaryContainer = Color.Black,
+        background = Color.White, onBackground = Color(0xFF171717),
+        surface = Color.White, onSurface = Color(0xFF171717),
+        surfaceVariant = Color(0xFFF5F5F5), onSurfaceVariant = Color(0xFF555555),
+        surfaceContainer = Color.White, surfaceContainerLow = Color.White,
+        surfaceContainerHigh = Color(0xFFF5F5F5), surfaceTint = Color.Transparent,
+        outline = Color(0xFF999999), outlineVariant = Color(0xFFD8D8D8)
+    )) {
+        ProductionTableContent(viewModel, onLogout)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ProductionTableContent(viewModel: ProductionHomeViewModel, onLogout: () -> Unit) {
     val state by viewModel.uiState.collectAsState()
     val snackbar = remember { SnackbarHostState() }
     var showFaults by rememberSaveable { mutableStateOf(false) }
@@ -36,7 +65,7 @@ fun ProductionTableScreen(viewModel: ProductionHomeViewModel, onLogout: () -> Un
         state.message?.let { viewModel.clearMessage(); snackbar.showSnackbar(it) }
     }
     Scaffold(topBar = {
-        TopAppBar(title = { Text("جدول الإنتاج • ${state.factoryName}") }, actions = {
+        TopAppBar(title = { Text("جدول الإنتاج • ${state.factoryName}", fontSize = 16.sp) }, actions = {
             TextButton(onClick = { viewModel.loadData() }, enabled = editable && dirty.values.none { it }) { Text("تحديث") }
             TextButton(onClick = { viewModel.logout(onLogout) }, enabled = dirty.values.none { it }) { Text("خروج") }
         })
@@ -47,7 +76,7 @@ fun ProductionTableScreen(viewModel: ProductionHomeViewModel, onLogout: () -> Un
                 dirty.values.none { it } && state.assets.isNotEmpty() && state.assets.all { isMachineRecorded(state.entries[it.id], state.stoppages) }) { Text("تسليم الوردية") }
         }
     }) { padding ->
-        LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             item {
                 Text("${state.currentDate} • ${when(state.selectedShift) { "FIRST" -> "الوردية الأولى"; "SECOND" -> "الوردية الثانية"; else -> "الوردية الثالثة" }}")
                 Text("اكتب داخل خلايا الجدول واحفظ الماكينة، ثم مرّر لأسفل للماكينة التالية.")
@@ -128,11 +157,19 @@ private fun MachineTable(asset: AssetEntity, entry: MachineEntryEntity?, state: 
     val valid = quantity.toDoubleOrNull()?.let { it.isFinite() && it >= 0 } == true &&
         cavities.toIntOrNull()?.let { it > 0 } == true && original.toIntOrNull()?.let { it > 0 } == true &&
         cooling.toDoubleOrNull()?.let { it.isFinite() && it >= 0 } == true && cycle.toDoubleOrNull()?.let { it.isFinite() && it >= 0 } == true && selectedUnit != null
-    Card(Modifier.fillMaxWidth(), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
-        Column(Modifier.padding(10.dp)) {
-            Text("${asset.assetCode} • ${asset.productionTitle}", style = MaterialTheme.typography.titleMedium)
-            Text(if (changed) "تعديلات لم تُحفظ" else if (entry != null) "محفوظ" else "لم يُسجل بعد")
-            Row(Modifier.fillMaxWidth().padding(vertical = 8.dp)) { Text("البيان / الافتراضي", Modifier.weight(1f)); Text("القيمة الفعلية", Modifier.weight(1.6f)) }
+    Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(4.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
+        Column {
+            Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("${asset.assetCode} • ${asset.productionTitle}", Modifier.weight(1f), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text(if (changed) "غير محفوظ" else if (entry != null) "محفوظ" else "جديد", fontSize = 11.sp, color = Color(0xFF555555))
+            }
+            Row(Modifier.fillMaxWidth().background(Color(0xFFF3F3F3)).padding(horizontal = 8.dp, vertical = 5.dp)) {
+                Text("البيان / الافتراضي", Modifier.weight(1f), fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                Text("القيمة الفعلية", Modifier.weight(1.6f), fontSize = 12.sp, fontWeight = FontWeight.Medium)
+            }
             TableCell("العامل", defaults.optString("operator_name"), worker, enabled) { worker = it; changed = true }
             TableCell("المنتج", defaults.optString("product_name"), product, enabled) { product = it; changed = true }
             TableCell("اللقم الأصلية", defaults.optString("original_cavities"), original, enabled, true) { original = it; changed = true }
@@ -141,11 +178,16 @@ private fun MachineTable(asset: AssetEntity, entry: MachineEntryEntity?, state: 
             TableCell("الدورة (ث)", defaults.optString("cycle_time_seconds"), cycle, enabled, true) { cycle = it; changed = true }
             TableCell("الخامة", defaults.optString("raw_material"), material, enabled) { material = it; changed = true }
             TableCell("العبوة", defaults.optString("packaging_type"), packaging, enabled) { packaging = it; changed = true }
-            Row { Text("التشغيل", Modifier.weight(1f)); FilterChip(mode == "AUTO", { mode = "AUTO"; changed = true }, { Text("أوتو") }, enabled = enabled); FilterChip(mode == "MANUAL", { mode = "MANUAL"; changed = true }, { Text("يدوي") }, enabled = enabled) }
+            HorizontalDivider()
+            Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("التشغيل", Modifier.weight(1f), fontSize = 13.sp)
+                FilterChip(mode == "AUTO", { mode = "AUTO"; changed = true }, { Text("أوتو", fontSize = 13.sp) }, enabled = enabled)
+                FilterChip(mode == "MANUAL", { mode = "MANUAL"; changed = true }, { Text("يدوي", fontSize = 13.sp) }, enabled = enabled)
+            }
             TableCell("كمية الإنتاج", "", quantity, enabled, true) { quantity = it; changed = true }
             TableCell("وحدة الإنتاج", defaults.optString("final_production_unit_name"), unit, enabled) { unit = it; changed = true }
-            Text("الوحدات المتاحة: " + state.productionOptions.filter { it.category == "FINAL_UNIT" }.joinToString { it.name }, style = MaterialTheme.typography.bodySmall)
-            Text("المستهدف: ${defaults.optString("target_cycle_production")} ${defaults.optString("target_cycle_unit_name")}")
+            Text("الوحدات: " + state.productionOptions.filter { it.category == "FINAL_UNIT" }.joinToString { it.name }, modifier = Modifier.padding(horizontal = 8.dp), fontSize = 11.sp, color = Color(0xFF555555))
+            Text("المستهدف: ${defaults.optString("target_cycle_production")} ${defaults.optString("target_cycle_unit_name")}", modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp), fontSize = 12.sp)
             TableCell("ملاحظات", "", notes, enabled) { notes = it; changed = true }
             if (!valid && changed) Text("راجع الأرقام واختر اسم وحدة من الوحدات المتاحة.", color = MaterialTheme.colorScheme.error)
             Button(onClick = {
@@ -165,18 +207,35 @@ private fun MachineTable(asset: AssetEntity, entry: MachineEntryEntity?, state: 
                     targetCycleProduction = defaults.optString("target_cycle_production").toDoubleOrNull() ?: 0.0,
                     targetCycleUnitName = defaults.optString("target_cycle_unit_name"), notes = notes, dashboardDefaults = baseline)
                 pending = saved.copy(id = 0).toString(); onSave(saved)
-            }, enabled = enabled && valid, modifier = Modifier.fillMaxWidth()) { Text("حفظ بيانات الماكينة") }
+            }, enabled = enabled && valid, modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
+                shape = RoundedCornerShape(4.dp), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)) { Text("حفظ الماكينة", fontSize = 13.sp) }
         }
     }
 }
 
 @Composable
 private fun TableCell(label: String, default: String, value: String, enabled: Boolean, numeric: Boolean = false, onChange: (String) -> Unit) {
+    var focused by remember { mutableStateOf(false) }
     HorizontalDivider()
-    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Column(Modifier.weight(1f)) { Text(label); if (default.isNotBlank()) Text("الافتراضي: $default", style = MaterialTheme.typography.bodySmall) }
-        OutlinedTextField(value, { text -> onChange(if (numeric) text.map { c -> if (c in '٠'..'٩') '0' + (c - '٠') else if (c == '٫') '.' else c }.joinToString("") else text) },
-            modifier = Modifier.weight(1.6f), enabled = enabled, keyboardOptions = KeyboardOptions(keyboardType = if (numeric) KeyboardType.Decimal else KeyboardType.Text),
-            singleLine = numeric, label = { Text(label) })
+    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f).padding(horizontal = 8.dp, vertical = 4.dp)) {
+            Text(label, fontSize = 13.sp, lineHeight = 17.sp)
+            if (default.isNotBlank()) Text("الافتراضي: $default", fontSize = 11.sp, lineHeight = 14.sp, color = Color(0xFF666666))
+        }
+        VerticalDivider(Modifier.fillMaxHeight())
+        BasicTextField(value, { text -> onChange(if (numeric) text.map { c -> if (c in '٠'..'٩') '0' + (c - '٠') else if (c == '٫') '.' else c }.joinToString("") else text) },
+            modifier = Modifier.weight(1.6f).heightIn(min = 48.dp).fillMaxHeight()
+                .onFocusChanged { focused = it.isFocused }
+                .background(if (focused) Color(0xFFF0F0F0) else Color.White)
+                .semantics { contentDescription = label }
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+            enabled = enabled, textStyle = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp, lineHeight = 19.sp, color = Color(0xFF171717)),
+            cursorBrush = SolidColor(Color.Black),
+            keyboardOptions = KeyboardOptions(keyboardType = if (numeric) KeyboardType.Decimal else KeyboardType.Text),
+            singleLine = numeric,
+            decorationBox = { innerTextField -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.CenterStart) {
+                if (value.isEmpty() && !focused) Text("—", color = Color(0xFF888888), fontSize = 14.sp)
+                innerTextField()
+            } })
     }
 }
