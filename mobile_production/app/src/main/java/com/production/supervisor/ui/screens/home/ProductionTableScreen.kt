@@ -55,6 +55,7 @@ private fun ProductionTableContent(viewModel: ProductionHomeViewModel, onLogout:
     var showFaults by rememberSaveable { mutableStateOf(false) }
     var faults by rememberSaveable(state.currentReportId) { mutableStateOf("") }
     var finish by remember { mutableStateOf(false) }
+    var showActions by remember { mutableStateOf(false) }
     var notes by rememberSaveable(state.currentReportId) { mutableStateOf("") }
     val dirty = rememberSaveable(state.currentReportId, saver = listSaver<SnapshotStateMap<Int, Boolean>, Int>(
         save = { map -> map.filterValues { it }.keys.toList() },
@@ -64,13 +65,32 @@ private fun ProductionTableContent(viewModel: ProductionHomeViewModel, onLogout:
     LaunchedEffect(state.message) {
         state.message?.let { viewModel.clearMessage(); snackbar.showSnackbar(it) }
     }
-    Scaffold(topBar = {
-        TopAppBar(title = { Text("جدول الإنتاج • ${state.factoryName}", fontSize = 16.sp) }, actions = {
-            TextButton(onClick = { viewModel.loadData() }, enabled = editable && dirty.values.none { it }) { Text("تحديث") }
-            TextButton(onClick = { viewModel.logout(onLogout) }, enabled = dirty.values.none { it }) { Text("خروج") }
-        })
-    }, snackbarHost = { SnackbarHost(snackbar) }, bottomBar = {
+    Scaffold(snackbarHost = { SnackbarHost(snackbar) }, bottomBar = {
         Row(Modifier.fillMaxWidth().navigationBarsPadding().imePadding().padding(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box {
+                TextButton(onClick = { showActions = true }) { Text("المزيد") }
+                DropdownMenu(expanded = showActions, onDismissRequest = { showActions = false }) {
+                    DropdownMenuItem(text = { Text(if (state.isReportSynced) "تم إرسال البيانات" else "بانتظار المزامنة") }, onClick = {}, enabled = false)
+                    if (state.isReportFinished) DropdownMenuItem(text = { Text("تم تسليم الوردية • عرض فقط") }, onClick = {}, enabled = false)
+                    DropdownMenuItem(text = { Text("توقف ماكينة / مدة التوقف") }, enabled = editable,
+                        onClick = { showActions = false; viewModel.openStoppageDialog() })
+                    DropdownMenuItem(text = { Text("إعادة المزامنة") }, onClick = { showActions = false; viewModel.retrySync() })
+                    DropdownMenuItem(text = { Text("تحديث البيانات") }, enabled = editable && dirty.values.none { it },
+                        onClick = { showActions = false; viewModel.loadData() })
+                    if (state.pendingHandover != null) DropdownMenuItem(text = { Text("استلام الوردية السابقة") },
+                        onClick = { showActions = false; viewModel.openHandoverDialog() })
+                    state.availableFactories.takeIf { it.size > 1 }?.forEach { factory ->
+                        DropdownMenuItem(text = { Text(factory.name) }, enabled = editable && dirty.values.none { it },
+                            onClick = { showActions = false; viewModel.selectFactory(factory) })
+                    }
+                    if (java.time.LocalDate.now(java.time.ZoneId.of("Africa/Cairo")).dayOfWeek == java.time.DayOfWeek.FRIDAY) {
+                        DropdownMenuItem(text = { Text("توقف صلاة الجمعة (60 دقيقة)") }, enabled = editable,
+                            onClick = { showActions = false; viewModel.addFridayPrayerStoppage() })
+                    }
+                    DropdownMenuItem(text = { Text("خروج") }, enabled = dirty.values.none { it },
+                        onClick = { showActions = false; viewModel.logout(onLogout) })
+                }
+            }
             OutlinedButton(onClick = { showFaults = true }, enabled = editable, modifier = Modifier.weight(1f)) { Text("إضافة أعطال") }
             Button(onClick = { finish = true }, modifier = Modifier.weight(1f), enabled = editable &&
                 dirty.values.none { it } && state.assets.isNotEmpty() && state.assets.all { isMachineRecorded(state.entries[it.id], state.stoppages) }) { Text("تسليم الوردية") }
@@ -78,25 +98,17 @@ private fun ProductionTableContent(viewModel: ProductionHomeViewModel, onLogout:
     }) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             item {
-                Text("${state.currentDate} • ${when(state.selectedShift) { "FIRST" -> "الوردية الأولى"; "SECOND" -> "الوردية الثانية"; else -> "الوردية الثالثة" }}")
-                Text("اكتب داخل خلايا الجدول واحفظ الماكينة، ثم مرّر لأسفل للماكينة التالية.")
-                Text("المكتمل: ${state.assets.count { isMachineRecorded(state.entries[it.id], state.stoppages) }} من ${state.assets.size} ماكينة")
-                Text("للماكينة المتوقفة: احفظ كمية صفر وسجّل توقف الماكينة ومدته.", style = MaterialTheme.typography.bodySmall)
-                Text(if (state.isReportSynced) "تم إرسال البيانات إلى الموقع" else "البيانات المحفوظة على الهاتف بانتظار المزامنة")
-                TextButton(onClick = viewModel::retrySync) { Text("إعادة المزامنة") }
-                if (state.isLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
-                if (state.isReportFinished) Text("تم تسليم الوردية • عرض فقط")
-                state.availableFactories.takeIf { it.size > 1 }?.let { factories ->
-                    factories.forEach { factory ->
-                        TextButton(onClick = { viewModel.selectFactory(factory) }, enabled = editable && dirty.values.none { it }) { Text(factory.name) }
+                Column(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("التاريخ: ${state.currentDate}", fontSize = 13.sp)
+                        Text("المكتمل: ${state.assets.count { isMachineRecorded(state.entries[it.id], state.stoppages) }} / ${state.assets.size}", fontSize = 13.sp)
                     }
+                    Text("المشرف: ${state.currentUser?.name?.takeIf { it.isNotBlank() } ?: state.cachedSupervisorName.ifBlank { "—" }}", fontSize = 14.sp, fontWeight = FontWeight.Medium)
                 }
-                if (state.pendingHandover != null) Button(onClick = viewModel::openHandoverDialog) { Text("استلام الوردية السابقة") }
-                OutlinedButton(onClick = viewModel::openStoppageDialog, enabled = editable) { Text("توقف ماكينة / مدة التوقف") }
-                if (java.time.LocalDate.now(java.time.ZoneId.of("Africa/Cairo")).dayOfWeek == java.time.DayOfWeek.FRIDAY) {
-                    TextButton(onClick = viewModel::addFridayPrayerStoppage, enabled = editable) { Text("توقف صلاة الجمعة للجميع (60 دقيقة)") }
-                }
-                if (state.assets.isEmpty() && !state.isLoading) Text("لا توجد ماكينات. حدّث البيانات للتحقق من المصنع.")
+            }
+            if (state.isLoading) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+            if (state.assets.isEmpty() && !state.isLoading) item {
+                Text("لا توجد ماكينات. حدّث البيانات للتحقق من المصنع.")
             }
             items(if (state.isLoading || state.currentReportId.isBlank()) emptyList() else state.assets, key = { "${state.currentReportId}:${it.id}:${state.entries[it.id]?.id ?: 0}" }) { asset ->
                 MachineTable(asset, state.entries[asset.id], state, editable,

@@ -30,6 +30,7 @@ data class ProductionHomeUiState(
     val availableFactories: List<com.production.supervisor.data.remote.dto.FactoryDto> = emptyList(),
     val selectedFactoryId: Int? = null,
     val currentUser: com.production.supervisor.data.remote.dto.UserDto? = null,
+    val cachedSupervisorName: String = "",
     val assets: List<AssetEntity> = emptyList(),
     val products: List<ProductEntity> = emptyList(),
     val operators: List<OperatorEntity> = emptyList(),
@@ -70,6 +71,11 @@ class ProductionHomeViewModel @Inject constructor(
     }
 
     private fun observeDatabase() {
+        viewModelScope.launch {
+            authRepository.userNameFlow.collect { name ->
+                _uiState.update { it.copy(cachedSupervisorName = name.orEmpty()) }
+            }
+        }
         viewModelScope.launch {
             repository.getAssetsFlow().collect { assetList ->
                 _uiState.update { it.copy(assets = assetList) }
