@@ -2,6 +2,7 @@ package com.production.supervisor.ui.screens.home
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.*
@@ -12,6 +13,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.mapSaver
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.decodeFromString
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
@@ -62,6 +67,13 @@ private fun ProductionTableContent(viewModel: ProductionHomeViewModel, onLogout:
         restore = { ids -> mutableStateMapOf<Int, Boolean>().apply { ids.forEach { put(it, true) } } }
     )) { mutableStateMapOf<Int, Boolean>() }
     val editable = !state.isReportFinished && !state.isLoading && !state.isSavingEntry && !state.isFinishingShift
+    val drafts = rememberSaveable(state.currentReportId, saver = mapSaver(
+        save = { map: SnapshotStateMap<Int, MachineEntryEntity?> -> map.entries.associate { it.key.toString() to Json.encodeToString(it.value) } },
+        restore = { values -> mutableStateMapOf<Int, MachineEntryEntity?>().apply {
+            values.forEach { (id, value) -> put(id.toInt(), Json.decodeFromString<MachineEntryEntity?>(value as String)) }
+        } }
+    )) { mutableStateMapOf<Int, MachineEntryEntity?>() }
+    val reportEntries = resolveReportEntries(state.entries, drafts)
     LaunchedEffect(state.message) {
         state.message?.let { viewModel.clearMessage(); snackbar.showSnackbar(it) }
     }
@@ -93,7 +105,7 @@ private fun ProductionTableContent(viewModel: ProductionHomeViewModel, onLogout:
             }
             OutlinedButton(onClick = { showFaults = true }, enabled = editable, modifier = Modifier.weight(1f)) { Text("إضافة أعطال") }
             Button(onClick = { finish = true }, modifier = Modifier.weight(1f), enabled = editable &&
-                dirty.values.none { it } && state.assets.isNotEmpty() && state.assets.all { isMachineRecorded(state.entries[it.id], state.stoppages) }) { Text("تسليم الوردية") }
+                state.assets.isNotEmpty() && state.assets.all { isMachineRecorded(reportEntries[it.id], state.stoppages) }) { Text("تسليم الوردية") }
         }
     }) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -101,7 +113,7 @@ private fun ProductionTableContent(viewModel: ProductionHomeViewModel, onLogout:
                 Column(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("التاريخ: ${state.currentDate}", fontSize = 13.sp)
-                        Text("المكتمل: ${state.assets.count { isMachineRecorded(state.entries[it.id], state.stoppages) }} / ${state.assets.size}", fontSize = 13.sp)
+                        Text("المكتمل: ${state.assets.count { isMachineRecorded(reportEntries[it.id], state.stoppages) }} / ${state.assets.size}", fontSize = 13.sp)
                     }
                     Text("المشرف: ${state.currentUser?.name?.takeIf { it.isNotBlank() } ?: state.cachedSupervisorName.ifBlank { "—" }}", fontSize = 14.sp, fontWeight = FontWeight.Medium)
                 }
@@ -112,7 +124,11 @@ private fun ProductionTableContent(viewModel: ProductionHomeViewModel, onLogout:
             }
             items(if (state.isLoading || state.currentReportId.isBlank()) emptyList() else state.assets, key = { "${state.currentReportId}:${it.id}:${state.entries[it.id]?.id ?: 0}" }) { asset ->
                 MachineTable(asset, state.entries[asset.id], state, editable,
-                    onDirty = { dirty[asset.id] = it }, onSave = viewModel::saveMachineEntry)
+                    onDirty = { dirty[asset.id] = it },
+                    onDraft = { changed, entry ->
+                        if (changed) { if (!drafts.containsKey(asset.id) || drafts[asset.id] != entry) drafts[asset.id] = entry }
+                        else drafts.remove(asset.id)
+                    }, onSave = viewModel::saveMachineEntry)
             }
             items(state.stoppages, key = { "fault:${it.id}" }) { fault ->
                 Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(12.dp)) {
@@ -130,14 +146,14 @@ private fun ProductionTableContent(viewModel: ProductionHomeViewModel, onLogout:
     }, enabled = faults.isNotBlank() && editable) { Text("حفظ الأعطال") } }, dismissButton = { TextButton(onClick = { showFaults = false }) { Text("رجوع") } })
     if (finish) AlertDialog(onDismissRequest = { finish = false }, title = { Text("تسليم الوردية") }, text = {
         OutlinedTextField(notes, { notes = it }, label = { Text("ملاحظات التسليم") })
-    }, confirmButton = { TextButton(onClick = { viewModel.finishShift(notes); finish = false }) { Text("تأكيد التسليم") } }, dismissButton = { TextButton(onClick = { finish = false }) { Text("رجوع") } })
+    }, confirmButton = { TextButton(onClick = { viewModel.finishShift(notes, drafts.toMap()); finish = false }, enabled = editable) { Text("حفظ الكل وتسليم") } }, dismissButton = { TextButton(onClick = { finish = false }) { Text("رجوع") } })
     if (state.isStoppageDialogVisible) StoppageDialog(state.assets, state.currentReportId, { viewModel.closeStoppageDialog() }, { viewModel.addStoppage(it) })
     if (state.isHandoverDialogVisible && state.pendingHandover != null) HandoverDialog(state.pendingHandover!!, { viewModel.closeHandoverDialog() }, { viewModel.confirmHandover(it) })
 }
 
 @Composable
 private fun MachineTable(asset: AssetEntity, entry: MachineEntryEntity?, state: ProductionHomeUiState,
-                         enabled: Boolean, onDirty: (Boolean) -> Unit, onSave: (MachineEntryEntity) -> Unit) {
+                         enabled: Boolean, onDirty: (Boolean) -> Unit, onDraft: (Boolean, MachineEntryEntity?) -> Unit, onSave: (MachineEntryEntity) -> Unit) {
     val baseline = rememberSaveable { entry?.dashboardDefaults?.takeIf { it.isNotBlank() } ?: JSONObject(mapOf(
         "operator_name" to asset.defaultOperatorName.orEmpty(), "product_name" to asset.defaultProductName.orEmpty(),
         "current_cavities" to asset.originalCavities.toString(), "original_cavities" to asset.originalCavities.toString(),
@@ -169,6 +185,24 @@ private fun MachineTable(asset: AssetEntity, entry: MachineEntryEntity?, state: 
     val valid = quantity.toDoubleOrNull()?.let { it.isFinite() && it >= 0 } == true &&
         cavities.toIntOrNull()?.let { it > 0 } == true && original.toIntOrNull()?.let { it > 0 } == true &&
         cooling.toDoubleOrNull()?.let { it.isFinite() && it >= 0 } == true && cycle.toDoubleOrNull()?.let { it.isFinite() && it >= 0 } == true && selectedUnit != null
+    val draftEntry = if (valid) {
+                val q = quantity.toDouble()
+                val workerId = state.operators.find { it.name == worker.trim() }?.id
+                val productId = state.products.find { it.name == product.trim() }?.id
+                MachineEntryEntity(id = entry?.id ?: 0, clientReportId = state.currentReportId, assetId = asset.id, assetCode = asset.assetCode,
+                    operatorId = workerId, operatorName = worker.trim(), originalOperatorId = if (entry != null) entry.originalOperatorId else asset.defaultOperatorId,
+                    originalOperatorName = defaults.optString("operator_name"), operatorChanged = worker.trim() != defaults.optString("operator_name"),
+                    productId = productId, productName = product.trim(), originalProductId = if (entry != null) entry.originalProductId else asset.defaultProductId,
+                    originalProductName = defaults.optString("product_name"), productChanged = product.trim() != defaults.optString("product_name"),
+                    originalCavities = original.toInt(), currentCavities = cavities.toInt(), coolingTimeSeconds = cooling.toDouble(), cycleTimeSeconds = cycle.toDouble(),
+                    originalCoolingTimeSeconds = defaults.optString("cooling_time_seconds").toDoubleOrNull() ?: 0.0,
+                    originalCycleTimeSeconds = defaults.optString("cycle_time_seconds").toDoubleOrNull() ?: 0.0,
+                    operationMode = mode, rawMaterial = material.trim(), packagingType = packaging.trim(), finalProductionQuantity = q,
+                    finalProductionUnitId = selectedUnit!!.id, finalProductionUnitName = selectedUnit.name, finalProductionWeightKg = q * (selectedUnit.kgPerUnit ?: 0.0),
+                    targetCycleProduction = defaults.optString("target_cycle_production").toDoubleOrNull() ?: 0.0,
+                    targetCycleUnitName = defaults.optString("target_cycle_unit_name"), notes = notes, dashboardDefaults = baseline)
+    } else null
+    SideEffect { onDraft(changed, draftEntry) }
     Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(4.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
@@ -188,8 +222,10 @@ private fun MachineTable(asset: AssetEntity, entry: MachineEntryEntity?, state: 
             TableCell("اللقم الحالية", defaults.optString("current_cavities"), cavities, enabled, true) { cavities = it; changed = true }
             TableCell("التبريد (ث)", defaults.optString("cooling_time_seconds"), cooling, enabled, true) { cooling = it; changed = true }
             TableCell("الدورة (ث)", defaults.optString("cycle_time_seconds"), cycle, enabled, true) { cycle = it; changed = true }
-            TableCell("الخامة", defaults.optString("raw_material"), material, enabled) { material = it; changed = true }
-            TableCell("العبوة", defaults.optString("packaging_type"), packaging, enabled) { packaging = it; changed = true }
+            TableDropdown("الخامة", defaults.optString("raw_material"), material,
+                listOf("بورسلين", "ABS", "P.P", "Hip", "P.C", "كرستال", "انتي شوك"), enabled) { material = it; changed = true }
+            TableDropdown("العبوة", defaults.optString("packaging_type"), packaging,
+                listOf("كرتونة", "كيلو", "شيكاره", "قطعة"), enabled) { packaging = it; changed = true }
             HorizontalDivider()
             Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("التشغيل", Modifier.weight(1f), fontSize = 13.sp)
@@ -203,24 +239,33 @@ private fun MachineTable(asset: AssetEntity, entry: MachineEntryEntity?, state: 
             TableCell("ملاحظات", "", notes, enabled) { notes = it; changed = true }
             if (!valid && changed) Text("راجع الأرقام واختر اسم وحدة من الوحدات المتاحة.", color = MaterialTheme.colorScheme.error)
             Button(onClick = {
-                val q = quantity.toDouble()
-                val workerId = state.operators.find { it.name == worker.trim() }?.id
-                val productId = state.products.find { it.name == product.trim() }?.id
-                val saved = MachineEntryEntity(id = entry?.id ?: 0, clientReportId = state.currentReportId, assetId = asset.id, assetCode = asset.assetCode,
-                    operatorId = workerId, operatorName = worker.trim(), originalOperatorId = if (entry != null) entry.originalOperatorId else asset.defaultOperatorId,
-                    originalOperatorName = defaults.optString("operator_name"), operatorChanged = worker.trim() != defaults.optString("operator_name"),
-                    productId = productId, productName = product.trim(), originalProductId = if (entry != null) entry.originalProductId else asset.defaultProductId,
-                    originalProductName = defaults.optString("product_name"), productChanged = product.trim() != defaults.optString("product_name"),
-                    originalCavities = original.toInt(), currentCavities = cavities.toInt(), coolingTimeSeconds = cooling.toDouble(), cycleTimeSeconds = cycle.toDouble(),
-                    originalCoolingTimeSeconds = defaults.optString("cooling_time_seconds").toDoubleOrNull() ?: 0.0,
-                    originalCycleTimeSeconds = defaults.optString("cycle_time_seconds").toDoubleOrNull() ?: 0.0,
-                    operationMode = mode, rawMaterial = material.trim(), packagingType = packaging.trim(), finalProductionQuantity = q,
-                    finalProductionUnitId = selectedUnit!!.id, finalProductionUnitName = selectedUnit.name, finalProductionWeightKg = q * (selectedUnit.kgPerUnit ?: 0.0),
-                    targetCycleProduction = defaults.optString("target_cycle_production").toDoubleOrNull() ?: 0.0,
-                    targetCycleUnitName = defaults.optString("target_cycle_unit_name"), notes = notes, dashboardDefaults = baseline)
+                val saved = draftEntry ?: return@Button
                 pending = saved.copy(id = 0).toString(); onSave(saved)
             }, enabled = enabled && valid, modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
                 shape = RoundedCornerShape(4.dp), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)) { Text("حفظ الماكينة", fontSize = 13.sp) }
+        }
+    }
+}
+
+@Composable
+private fun TableDropdown(label: String, default: String, value: String, options: List<String>, enabled: Boolean, onChange: (String) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    HorizontalDivider()
+    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f).padding(horizontal = 8.dp, vertical = 4.dp)) {
+            Text(label, fontSize = 13.sp, lineHeight = 17.sp)
+            if (default.isNotBlank()) Text("الافتراضي: $default", fontSize = 11.sp, lineHeight = 14.sp, color = Color(0xFF666666))
+        }
+        VerticalDivider(Modifier.fillMaxHeight())
+        Box(Modifier.weight(1.6f)) {
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(enabled = enabled) { expanded = true }
+                .semantics { contentDescription = label }.padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(value.ifBlank { "اختر $label" }, Modifier.weight(1f), fontSize = 14.sp)
+                Text("▾", fontSize = 16.sp)
+            }
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                options.forEach { option -> DropdownMenuItem(text = { Text(option) }, onClick = { onChange(option); expanded = false }) }
+            }
         }
     }
 }

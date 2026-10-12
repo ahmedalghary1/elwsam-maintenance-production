@@ -246,11 +246,11 @@ class ProductionRepository @Inject constructor(
         addStoppage(prayerStoppage)
     }
 
-    suspend fun finishShift(clientReportId: String, notes: String): Result<Unit> {
+    suspend fun finishShift(clientReportId: String, notes: String, entries: List<MachineEntryEntity> = emptyList()): Result<Unit> {
         return try {
-            dao.finishReportLocally(
-                clientReportId, notes, LocalDateTime.now(ZoneId.of("Africa/Cairo")).toString()
-            )
+            val completedAt = LocalDateTime.now(ZoneId.of("Africa/Cairo")).toString()
+            if (entries.isEmpty()) dao.finishReportLocally(clientReportId, notes, completedAt)
+            else dao.saveEntriesAndFinish(clientReportId, entries, notes, completedAt)
             requestSync(clientReportId)
             Result.success(Unit)
         } catch (cancelled: CancellationException) {

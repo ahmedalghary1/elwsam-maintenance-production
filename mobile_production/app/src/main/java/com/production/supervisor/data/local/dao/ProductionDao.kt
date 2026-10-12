@@ -139,6 +139,14 @@ interface ProductionDao {
     }
 
     @Transaction
+    suspend fun saveEntriesAndFinish(reportId: String, entries: List<MachineEntryEntity>, notes: String, completedAt: String) {
+        requireEditableReport(reportId)
+        require(entries.isNotEmpty() && entries.all { it.clientReportId == reportId })
+        entries.forEach { upsertMachineEntry(it) }
+        markReportFinished(reportId, "PENDING_HANDOVER", notes, completedAt)
+    }
+
+    @Transaction
     suspend fun finishReportLocally(reportId: String, notes: String, completedAt: String) {
         val report = getShiftReport(reportId)
             ?: throw IllegalStateException("التقرير غير موجود. أعد فتح الوردية.")

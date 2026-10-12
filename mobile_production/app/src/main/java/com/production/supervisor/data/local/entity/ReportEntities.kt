@@ -33,6 +33,7 @@ data class ShiftReportEntity(
         Index(value = ["clientReportId"])
     ]
 )
+@kotlinx.serialization.Serializable
 data class MachineEntryEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val clientReportId: String,

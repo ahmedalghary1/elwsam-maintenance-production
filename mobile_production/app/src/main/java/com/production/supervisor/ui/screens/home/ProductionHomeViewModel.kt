@@ -300,20 +300,24 @@ class ProductionHomeViewModel @Inject constructor(
         }
     }
 
-    fun finishShift(notes: String) {
+    fun finishShift(notes: String, drafts: Map<Int, MachineEntryEntity?> = emptyMap()) {
         val state = _uiState.value
         if (state.isFinishingShift || state.isSavingEntry || state.isLoading || state.isReportFinished) return
+        val allEntries = resolveReportEntries(state.entries, drafts)
         val missing = state.assets.filter { asset ->
-            !isMachineRecorded(state.entries[asset.id], state.stoppages)
+            !isMachineRecorded(allEntries[asset.id], state.stoppages)
         }
         if (state.currentReportId.isBlank() || state.assets.isEmpty() || missing.isNotEmpty()) {
             _uiState.update { it.copy(message = "أكمل بيانات جميع الماكينات قبل تسليم التقرير") }
             return
         }
+        val entries = state.assets.map { allEntries.getValue(it.id)!! }
+        if (entries.any { it.clientReportId != state.currentReportId ||
+                !validMachineValues(it.finalProductionQuantity, it.currentCavities, it.originalCavities, it.coolingTimeSeconds, it.cycleTimeSeconds) }) return
         _uiState.update { it.copy(isFinishingShift = true) }
         viewModelScope.launch {
             try {
-                repository.finishShift(state.currentReportId, notes)
+                repository.finishShift(state.currentReportId, notes, entries)
                     .onSuccess {
                         _uiState.update { it.copy(isReportFinished = true, message = "تم حفظ التقرير. يظهر تأكيد الإرسال عند وصوله إلى الموقع.") }
                     }.onFailure { ex ->

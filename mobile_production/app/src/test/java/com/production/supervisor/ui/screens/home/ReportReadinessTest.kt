@@ -4,10 +4,30 @@ import com.production.supervisor.data.local.entity.MachineEntryEntity
 import com.production.supervisor.data.local.entity.StoppageEntity
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class ReportReadinessTest {
     private val entry = MachineEntryEntity(clientReportId = "report", assetId = 4, assetCode = "M4")
+
+    @Test fun submissionIncludesUnsavedMachinesAndLatestEdits() {
+        val old = entry.copy(finalProductionQuantity = 5.0)
+        val edited = old.copy(finalProductionQuantity = 12.0)
+        val next = entry.copy(assetId = 5, finalProductionQuantity = 9.0)
+        val result = resolveReportEntries(mapOf(4 to old), mapOf(4 to edited, 5 to next))
+        assertEquals(edited, result[4])
+        assertEquals(next, result[5])
+        assertTrue(result.values.all { isMachineRecorded(it, emptyList()) })
+    }
+
+    @Test fun invalidUnsavedEditBlocksPreviouslyCompletedMachine() {
+        val saved = entry.copy(finalProductionQuantity = 5.0)
+        val result = resolveReportEntries(mapOf(4 to saved), mapOf(4 to null))
+        assertNull(result[4])
+        assertFalse(isMachineRecorded(result[4], emptyList()))
+        assertEquals(saved, resolveReportEntries(mapOf(4 to saved), emptyMap())[4])
+    }
 
     @Test fun nonWeightUnitCompletesMachine() {
         assertTrue(isMachineRecorded(entry.copy(finalProductionQuantity = 12.0, finalProductionUnitName = "قطعة"), emptyList()))
