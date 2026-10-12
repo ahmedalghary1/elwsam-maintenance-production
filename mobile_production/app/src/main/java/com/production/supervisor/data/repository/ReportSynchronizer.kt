@@ -92,6 +92,7 @@ internal fun ReportSnapshot.toInput() = SyncShiftReportInputDto(
             operationMode = it.operationMode,
             coolingTimeSeconds = it.coolingTimeSeconds,
             cycleTimeSeconds = it.cycleTimeSeconds,
+            dashboardDefaults = it.dashboardDefaults,
             originalCoolingTimeSeconds = it.originalCoolingTimeSeconds,
             originalCycleTimeSeconds = it.originalCycleTimeSeconds,
             rawMaterial = it.rawMaterial,

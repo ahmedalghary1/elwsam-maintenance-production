@@ -113,6 +113,7 @@ data class SyncShiftReportInputDto(
 
 @Serializable
 data class MachineEntryInputDto(
+    @SerialName("dashboard_defaults") val dashboardDefaults: String = "",
     @SerialName("asset_id") val assetId: Int,
     @SerialName("operator_id") val operatorId: Int? = null,
     @SerialName("operator_name") val operatorName: String = "",
@@ -180,6 +181,7 @@ data class ShiftReportDto(
 
 @Serializable
 data class MachineEntryOutputDto(
+    @SerialName("dashboard_defaults") val dashboardDefaults: String = "",
     val asset: Int,
     @SerialName("asset_code") val assetCode: String = "",
     val operator: Int? = null,

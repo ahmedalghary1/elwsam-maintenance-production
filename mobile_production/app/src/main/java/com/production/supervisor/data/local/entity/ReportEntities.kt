@@ -37,6 +37,7 @@ data class MachineEntryEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val clientReportId: String,
     val assetId: Int,
+    @ColumnInfo(defaultValue = "''") val dashboardDefaults: String = "",
     val assetCode: String,
     val operatorId: Int? = null,
     val operatorName: String = "",

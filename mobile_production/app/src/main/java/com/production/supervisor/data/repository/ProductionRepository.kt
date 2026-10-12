@@ -153,6 +153,7 @@ class ProductionRepository @Inject constructor(
                                 operationMode = entry.operationMode,
                                 coolingTimeSeconds = entry.coolingTimeSeconds,
                                 cycleTimeSeconds = entry.cycleTimeSeconds,
+                                dashboardDefaults = entry.dashboardDefaults,
                                 originalCoolingTimeSeconds = entry.originalCoolingTimeSeconds ?: entry.coolingTimeSeconds,
                                 originalCycleTimeSeconds = entry.originalCycleTimeSeconds ?: entry.cycleTimeSeconds,
                                 rawMaterial = entry.rawMaterial,

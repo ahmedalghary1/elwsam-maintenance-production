@@ -45,7 +45,7 @@ fun ProductionHomeScreen(
     var finishShiftNotes by remember { mutableStateOf("") }
 
     if (uiState.isFawryMode) {
-        FawryWizardScreen(
+        ProductionTableScreen(
             viewModel = viewModel,
             onLogout = onLogout
         )

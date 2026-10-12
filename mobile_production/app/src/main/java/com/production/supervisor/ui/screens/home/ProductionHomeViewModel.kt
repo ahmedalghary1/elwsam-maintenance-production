@@ -231,6 +231,16 @@ class ProductionHomeViewModel @Inject constructor(
         _uiState.update { it.copy(isStoppageDialogVisible = false) }
     }
 
+    fun addGeneralFaults(description: String, onSaved: () -> Unit = {}) {
+        if (description.isBlank()) return
+        saveEntryLocally {
+            repository.addStoppage(StoppageEntity(clientReportId = _uiState.value.currentReportId,
+                stoppageType = "OTHER", stoppageTypeDisplay = "أعطال عامة", description = description.trim()))
+            _uiState.update { it.copy(message = "تم حفظ الأعطال") }
+            onSaved()
+        }
+    }
+
     fun addStoppage(stoppage: StoppageEntity) {
         if (stoppage.durationMinutes <= 0 || stoppage.description.isBlank()) {
             _uiState.update { it.copy(message = "أدخل سبب التوقف ومدة أكبر من صفر") }

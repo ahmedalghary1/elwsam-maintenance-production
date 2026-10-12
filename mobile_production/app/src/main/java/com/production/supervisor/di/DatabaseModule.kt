@@ -22,7 +22,7 @@ object DatabaseModule {
             context,
             ProductionDatabase::class.java,
             "production_supervisor.db"
-        ).addMigrations(ProductionDatabase.MIGRATION_3_4, ProductionDatabase.MIGRATION_4_5).build()
+        ).addMigrations(ProductionDatabase.MIGRATION_3_4, ProductionDatabase.MIGRATION_4_5, ProductionDatabase.MIGRATION_5_6).build()
     }
 
     @Provides
