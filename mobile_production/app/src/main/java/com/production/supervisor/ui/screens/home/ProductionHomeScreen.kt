@@ -395,7 +395,10 @@ fun ProductionHomeScreen(
         HandoverDialog(
             pendingReport = uiState.pendingHandover!!,
             onDismiss = { viewModel.closeHandoverDialog() },
-            onConfirm = { notes -> viewModel.confirmHandover(notes) }
+            onConfirm = { notes -> viewModel.confirmHandover(notes) },
+            onReject = { notes -> viewModel.confirmHandover(notes, "REJECT") },
+            busy = uiState.isLoading,
+            error = uiState.message
         )
     }
 

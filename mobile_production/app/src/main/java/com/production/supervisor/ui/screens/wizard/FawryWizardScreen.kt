@@ -188,8 +188,14 @@ fun FawryWizardScreen(viewModel: ProductionHomeViewModel, onLogout: () -> Unit) 
         }
     }
     if (uiState.isHandoverDialogVisible && uiState.pendingHandover != null) {
-        HandoverDialog(pendingReport = uiState.pendingHandover!!,
-            onDismiss = { viewModel.closeHandoverDialog() }, onConfirm = { viewModel.confirmHandover(it) })
+        HandoverDialog(
+            pendingReport = uiState.pendingHandover!!,
+            onDismiss = { viewModel.closeHandoverDialog() },
+            onConfirm = { viewModel.confirmHandover(it) },
+            onReject = { viewModel.confirmHandover(it, "REJECT") },
+            busy = uiState.isLoading,
+            error = uiState.message
+        )
     }
 }
 

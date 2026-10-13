@@ -153,7 +153,16 @@ private fun ProductionTableContent(viewModel: ProductionHomeViewModel, onLogout:
         OutlinedTextField(notes, { notes = it }, label = { Text("ملاحظات التسليم") })
     }, confirmButton = { TextButton(onClick = { viewModel.finishShift(notes, drafts.toMap()); finish = false }, enabled = editable) { Text("حفظ الكل وتسليم") } }, dismissButton = { TextButton(onClick = { finish = false }) { Text("رجوع") } })
     if (state.isStoppageDialogVisible) StoppageDialog(state.assets, state.currentReportId, { viewModel.closeStoppageDialog() }, { viewModel.addStoppage(it) })
-    if (state.isHandoverDialogVisible && state.pendingHandover != null) HandoverDialog(state.pendingHandover!!, { viewModel.closeHandoverDialog() }, { viewModel.confirmHandover(it) })
+    if (state.isHandoverDialogVisible && state.pendingHandover != null) {
+        HandoverDialog(
+            pendingReport = state.pendingHandover!!,
+            onDismiss = { viewModel.closeHandoverDialog() },
+            onConfirm = { viewModel.confirmHandover(it) },
+            onReject = { viewModel.confirmHandover(it, "REJECT") },
+            busy = state.isLoading,
+            error = state.message
+        )
+    }
 }
 
 @Composable
