@@ -155,17 +155,26 @@ fun ProductionHomeScreen(
                         Text("تسجيل عطل", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color.White)
                     }
 
+                    val isShiftReady = uiState.assets.isNotEmpty() && uiState.assets.all {
+                        isMachineAccountedFor(it.id, uiState.entries[it.id], uiState.stoppages, uiState.stoppedMachineAssetIds)
+                    } && !uiState.isReportFinished && !uiState.isSavingEntry && !uiState.isFinishingShift
+
                     Button(
                         onClick = { showFinishShiftDialog = true },
-                        enabled = uiState.assets.isNotEmpty() && uiState.assets.all { isMachineRecorded(uiState.entries[it.id], uiState.stoppages) } && !uiState.isReportFinished && !uiState.isSavingEntry && !uiState.isFinishingShift,
+                        enabled = isShiftReady,
                         modifier = Modifier.weight(1f).height(48.dp),
                         shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = FactoryNavy),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = FactoryGreen,
+                            contentColor = Color.White,
+                            disabledContainerColor = Color(0xFFE2E8F0),
+                            disabledContentColor = Color(0xFF94A3B8)
+                        ),
                         elevation = ButtonDefaults.buttonElevation(defaultElevation = 1.dp)
                     ) {
                         Icon(Icons.Outlined.AssignmentTurnedIn, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color.White)
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("تسليم الوردية", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color.White)
+                        Text("تسليم الوردية", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = if (isShiftReady) Color.White else Color(0xFF94A3B8))
                     }
                 }
             }
@@ -301,7 +310,8 @@ fun ProductionHomeScreen(
 
             // 4. Statistics Banner
             item {
-                val recordedCount = uiState.assets.count { isMachineRecorded(uiState.entries[it.id], uiState.stoppages) }
+                val recordedCount = uiState.assets.count { isMachineAccountedFor(it.id, uiState.entries[it.id], uiState.stoppages, uiState.stoppedMachineAssetIds) }
+                val stoppedCount = uiState.assets.count { uiState.stoppedMachineAssetIds.contains(it.id) }
                 val totalMachines = uiState.assets.size
                 val totalWeight = uiState.entries.values.sumOf { it.finalProductionWeightKg }
 
@@ -319,7 +329,7 @@ fun ProductionHomeScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "المسجل: $recordedCount من $totalMachines ماكينة",
+                            text = if (stoppedCount > 0) "المسجل: $recordedCount من $totalMachines ($stoppedCount متوقفة)" else "المسجل: $recordedCount من $totalMachines ماكينة",
                             fontWeight = FontWeight.Bold,
                             fontSize = 13.sp,
                             color = FactoryTextPrimary
@@ -347,14 +357,16 @@ fun ProductionHomeScreen(
             // 6. Machines List Items
             items(uiState.assets, key = { it.id }) { asset ->
                 val entry = uiState.entries[asset.id]
-                val isRecorded = isMachineRecorded(entry, uiState.stoppages)
                 val hasStoppage = uiState.stoppages.any { it.assetId == asset.id }
+                val isStopped = uiState.stoppedMachineAssetIds.contains(asset.id)
 
                 MachineCard(
                     asset = asset,
                     entry = entry,
                     hasStoppage = hasStoppage,
-                    onClick = { if (!uiState.isReportFinished && !uiState.isSavingEntry) viewModel.openMachineEntry(asset) }
+                    isStopped = isStopped,
+                    onToggleStopped = { viewModel.toggleMachineStopped(asset.id) },
+                    onClick = { if (!uiState.isReportFinished && !uiState.isSavingEntry && !isStopped) viewModel.openMachineEntry(asset) }
                 )
             }
 
@@ -478,7 +490,7 @@ fun ProductionHomeScreen(
                         viewModel.finishShift(finishShiftNotes)
                         showFinishShiftDialog = false
                     },
-                    enabled = !uiState.isFinishingShift && !uiState.isSavingEntry && !uiState.isReportFinished && uiState.assets.all { isMachineRecorded(uiState.entries[it.id], uiState.stoppages) },
+                    enabled = !uiState.isFinishingShift && !uiState.isSavingEntry && !uiState.isReportFinished && uiState.assets.all { isMachineAccountedFor(it.id, uiState.entries[it.id], uiState.stoppages, uiState.stoppedMachineAssetIds) },
                     colors = ButtonDefaults.buttonColors(containerColor = FactoryGreen),
                     shape = RoundedCornerShape(10.dp)
                 ) {
@@ -501,17 +513,21 @@ fun MachineCard(
     asset: AssetEntity,
     entry: MachineEntryEntity?,
     hasStoppage: Boolean,
+    isStopped: Boolean = false,
+    onToggleStopped: (() -> Unit)? = null,
     onClick: () -> Unit
 ) {
     val isRecorded = entry != null
 
     val borderColor = when {
+        isStopped -> FactoryOrange
         hasStoppage -> FactoryOrange
         isRecorded -> FactoryGreen.copy(alpha = 0.6f)
         else -> FactoryCardBorder
     }
 
     val statusBg = when {
+        isStopped -> FactoryLightOrange
         hasStoppage -> FactoryLightOrange
         isRecorded -> FactoryLightGreen
         else -> FactorySurfaceVariant
@@ -537,7 +553,7 @@ fun MachineCard(
                     Box(
                         modifier = Modifier
                             .size(38.dp)
-                            .background(if (isRecorded) FactoryGreen else FactoryNavy, RoundedCornerShape(10.dp)),
+                            .background(if (isStopped) FactoryOrangeDark else if (isRecorded) FactoryGreen else FactoryNavy, RoundedCornerShape(10.dp)),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
@@ -563,50 +579,71 @@ fun MachineCard(
                     }
                 }
 
-                // Status Badge
-                Box(
-                    modifier = Modifier
-                        .background(statusBg, RoundedCornerShape(20.dp))
-                        .padding(horizontal = 10.dp, vertical = 4.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (onToggleStopped != null) {
+                        FilterChip(
+                            selected = isStopped,
+                            onClick = onToggleStopped,
+                            label = { Text(if (isStopped) "متوقفة" else "متوقفة؟", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = FactoryLightOrange,
+                                selectedLabelColor = FactoryOrangeDark
+                            )
+                        )
+                    }
+                    // Status Badge
+                    Box(
+                        modifier = Modifier
+                            .background(statusBg, RoundedCornerShape(20.dp))
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
                     ) {
-                        when {
-                            hasStoppage -> Icon(
-                                Icons.Outlined.Warning,
-                                contentDescription = null,
-                                modifier = Modifier.size(13.dp),
-                                tint = FactoryOrangeDark
-                            )
-                            isRecorded -> Icon(
-                                Icons.Outlined.CheckCircle,
-                                contentDescription = null,
-                                modifier = Modifier.size(13.dp),
-                                tint = FactoryGreenDark
-                            )
-                            else -> Icon(
-                                Icons.Outlined.RadioButtonUnchecked,
-                                contentDescription = null,
-                                modifier = Modifier.size(13.dp),
-                                tint = FactoryTextMuted
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            when {
+                                isStopped -> Icon(
+                                    Icons.Outlined.Warning,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(13.dp),
+                                    tint = FactoryOrangeDark
+                                )
+                                hasStoppage -> Icon(
+                                    Icons.Outlined.Warning,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(13.dp),
+                                    tint = FactoryOrangeDark
+                                )
+                                isRecorded -> Icon(
+                                    Icons.Outlined.CheckCircle,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(13.dp),
+                                    tint = FactoryGreenDark
+                                )
+                                else -> Icon(
+                                    Icons.Outlined.RadioButtonUnchecked,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(13.dp),
+                                    tint = FactoryTextMuted
+                                )
+                            }
+                            Text(
+                                text = when {
+                                    isStopped -> "متوقفة"
+                                    hasStoppage -> "يوجد توقف"
+                                    isRecorded -> "تم التسجيل"
+                                    else -> "لم يسجل"
+                                },
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = when {
+                                    isStopped -> FactoryOrangeDark
+                                    hasStoppage -> FactoryOrangeDark
+                                    isRecorded -> FactoryGreenDark
+                                    else -> FactoryTextMuted
+                                }
                             )
                         }
-                        Text(
-                            text = when {
-                                hasStoppage -> "يوجد توقف"
-                                isRecorded -> "تم التسجيل"
-                                else -> "لم يسجل"
-                            },
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = when {
-                                hasStoppage -> FactoryOrangeDark
-                                isRecorded -> FactoryGreenDark
-                                else -> FactoryTextMuted
-                            }
-                        )
                     }
                 }
             }

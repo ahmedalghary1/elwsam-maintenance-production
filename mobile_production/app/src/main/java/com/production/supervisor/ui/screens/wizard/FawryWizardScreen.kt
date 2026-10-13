@@ -55,7 +55,7 @@ private fun numericText(value: String): String = buildString {
 }
 
 private fun ProductionHomeUiState.isRecorded(asset: AssetEntity): Boolean {
-    return isMachineRecorded(entries[asset.id], stoppages)
+    return stoppedMachineAssetIds.contains(asset.id) || isMachineRecorded(entries[asset.id], stoppages)
 }
 
 private fun quantitySummary(entries: Collection<MachineEntryEntity>): String = entries

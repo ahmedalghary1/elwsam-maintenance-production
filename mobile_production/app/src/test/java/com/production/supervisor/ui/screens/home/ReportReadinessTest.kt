@@ -49,4 +49,17 @@ class ReportReadinessTest {
         assertFalse(isMachineRecorded(entry, listOf(stop.copy(durationMinutes = 0))))
         assertTrue(isMachineRecorded(entry, listOf(stop)))
     }
+
+    @Test fun machineMarkedAsStoppedIsAccountedForWithoutEntry() {
+        // Machine 4 has no entry at all, but is marked as stopped
+        assertTrue(isMachineAccountedFor(4, null, emptyList(), setOf(4)))
+        // When toggle is removed, it is no longer accounted for
+        assertFalse(isMachineAccountedFor(4, null, emptyList(), emptySet()))
+    }
+
+    @Test fun normalRecordedMachineIsAccountedForRegardlessOfStoppedSet() {
+        val recorded = entry.copy(finalProductionQuantity = 25.0)
+        assertTrue(isMachineAccountedFor(4, recorded, emptyList(), emptySet()))
+        assertTrue(isMachineAccountedFor(4, recorded, emptyList(), setOf(4)))
+    }
 }

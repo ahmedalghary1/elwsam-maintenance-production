@@ -1,5 +1,6 @@
 package com.production.supervisor.ui.screens.home
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.production.supervisor.data.local.entity.*
@@ -7,6 +8,7 @@ import com.production.supervisor.data.remote.dto.ShiftReportDto
 import com.production.supervisor.data.repository.AuthRepository
 import com.production.supervisor.data.repository.ProductionRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
@@ -37,6 +39,7 @@ data class ProductionHomeUiState(
     val productionOptions: List<ProductionOptionEntity> = emptyList(),
     val entries: Map<Int, MachineEntryEntity> = emptyMap(), // assetId -> entry
     val stoppages: List<StoppageEntity> = emptyList(),
+    val stoppedMachineAssetIds: Set<Int> = emptySet(),
     val pendingHandover: ShiftReportDto? = null,
     val handoverChecked: Boolean = false,
     val isLoading: Boolean = false,
@@ -60,11 +63,23 @@ data class ProductionHomeUiState(
 @HiltViewModel
 class ProductionHomeViewModel @Inject constructor(
     private val repository: ProductionRepository,
-    private val authRepository: AuthRepository
+    private val authRepository: AuthRepository,
+    @ApplicationContext private val context: Context
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ProductionHomeUiState())
     val uiState: StateFlow<ProductionHomeUiState> = _uiState.asStateFlow()
+
+    private fun getStoppedPrefs() = context.getSharedPreferences("stopped_machines_prefs", Context.MODE_PRIVATE)
+
+    private fun saveStoppedMachineIdsForReport(reportId: String, ids: Set<Int>) {
+        getStoppedPrefs().edit().putStringSet("stopped_$reportId", ids.map { it.toString() }.toSet()).apply()
+    }
+
+    private fun loadStoppedMachineIdsForReport(reportId: String): Set<Int> {
+        return getStoppedPrefs().getStringSet("stopped_$reportId", emptySet())
+            ?.mapNotNull { it.toIntOrNull() }?.toSet() ?: emptySet()
+    }
 
     init {
         observeDatabase()
@@ -177,9 +192,11 @@ class ProductionHomeViewModel @Inject constructor(
                     return@launch
                 }
                 val report = repository.getOrCreateShiftReport(_uiState.value.currentDate, currentShift)
+                val stoppedIds = loadStoppedMachineIdsForReport(report.clientReportId)
                 _uiState.update {
                     it.copy(
                         currentReportId = report.clientReportId,
+                        stoppedMachineAssetIds = stoppedIds,
                         wizardStarted = if (factoryId != null) false else it.wizardStarted,
                         wizardAssetIndex = if (factoryId != null) 0 else it.wizardAssetIndex,
                         wizardSubStep = if (factoryId != null) WizardSubStep.STATUS else it.wizardSubStep,
@@ -214,12 +231,31 @@ class ProductionHomeViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val report = repository.getOrCreateShiftReport(_uiState.value.currentDate, shift)
-                _uiState.update { it.copy(selectedShift = shift, currentReportId = report.clientReportId, wizardStarted = false) }
+                val stoppedIds = loadStoppedMachineIdsForReport(report.clientReportId)
+                _uiState.update { it.copy(selectedShift = shift, currentReportId = report.clientReportId, stoppedMachineAssetIds = stoppedIds, wizardStarted = false) }
             } catch (ex: CancellationException) {
                 throw ex
             } catch (ex: Exception) {
                 _uiState.update { it.copy(message = ex.message ?: "تعذر فتح الوردية") }
             }
+        }
+    }
+
+    fun toggleMachineStopped(assetId: Int) {
+        if (!canEditReport()) return
+        _uiState.update { current ->
+            val newSet = if (current.stoppedMachineAssetIds.contains(assetId)) {
+                current.stoppedMachineAssetIds - assetId
+            } else {
+                current.stoppedMachineAssetIds + assetId
+            }
+            val reportId = current.currentReportId
+            if (reportId.isNotBlank()) {
+                saveStoppedMachineIdsForReport(reportId, newSet)
+            }
+            val machineCode = current.assets.find { it.id == assetId }?.assetCode ?: "الماكينة"
+            val msg = if (newSet.contains(assetId)) "تم تحديد $machineCode كمتوقفة" else "تم إلغاء إيقاف $machineCode"
+            current.copy(stoppedMachineAssetIds = newSet, message = msg)
         }
     }
 
@@ -238,7 +274,16 @@ class ProductionHomeViewModel @Inject constructor(
         saveEntryLocally {
             val finalEntry = entry.copy(clientReportId = _uiState.value.currentReportId)
             repository.saveMachineEntry(finalEntry)
-            _uiState.update { it.copy(entries = it.entries + (finalEntry.assetId to finalEntry)) }
+            val updatedStopped = _uiState.value.stoppedMachineAssetIds - entry.assetId
+            if (updatedStopped != _uiState.value.stoppedMachineAssetIds && _uiState.value.currentReportId.isNotBlank()) {
+                saveStoppedMachineIdsForReport(_uiState.value.currentReportId, updatedStopped)
+            }
+            _uiState.update {
+                it.copy(
+                    entries = it.entries + (finalEntry.assetId to finalEntry),
+                    stoppedMachineAssetIds = updatedStopped
+                )
+            }
             closeMachineEntry()
             _uiState.update { it.copy(message = "تم حفظ بيانات الماكينة ${finalEntry.assetCode}") }
         }
@@ -329,13 +374,15 @@ class ProductionHomeViewModel @Inject constructor(
         if (state.isFinishingShift || state.isSavingEntry || state.isLoading || state.isReportFinished) return
         val allEntries = resolveReportEntries(state.entries, drafts)
         val missing = state.assets.filter { asset ->
-            !isMachineRecorded(allEntries[asset.id], state.stoppages)
+            !isMachineAccountedFor(asset.id, allEntries[asset.id], state.stoppages, state.stoppedMachineAssetIds)
         }
         if (state.currentReportId.isBlank() || state.assets.isEmpty() || missing.isNotEmpty()) {
-            _uiState.update { it.copy(message = "أكمل بيانات جميع الماكينات قبل تسليم التقرير") }
+            _uiState.update { it.copy(message = "أكمل بيانات جميع الماكينات أو حدد الماكينات المتوقفة قبل تسليم التقرير") }
             return
         }
-        val entries = state.assets.map { allEntries.getValue(it.id)!! }
+        val entries = state.assets
+            .filter { asset -> !state.stoppedMachineAssetIds.contains(asset.id) && allEntries[asset.id] != null }
+            .map { asset -> allEntries.getValue(asset.id)!! }
         if (entries.any { it.clientReportId != state.currentReportId ||
                 !validMachineValues(it.finalProductionQuantity, it.currentCavities, it.originalCavities, it.coolingTimeSeconds, it.cycleTimeSeconds) }) return
         _uiState.update { it.copy(isFinishingShift = true) }
@@ -409,7 +456,7 @@ class ProductionHomeViewModel @Inject constructor(
         if (assets.isEmpty() || _uiState.value.isLoading || _uiState.value.isSavingEntry) return
         val state = _uiState.value
         val firstUnrecordedIndex = assets.indexOfFirst { asset ->
-            !isMachineRecorded(state.entries[asset.id], state.stoppages)
+            !isMachineAccountedFor(asset.id, state.entries[asset.id], state.stoppages, state.stoppedMachineAssetIds)
         }
         val startIndex = if (targetIndex != null) {
             targetIndex.coerceIn(0, (assets.size - 1).coerceAtLeast(0))
