@@ -155,7 +155,8 @@ data class StoppageInputDto(
 @Serializable
 data class ConfirmHandoverInputDto(
     @SerialName("client_report_id") val clientReportId: String,
-    @SerialName("handover_notes") val handoverNotes: String = ""
+    @SerialName("handover_notes") val handoverNotes: String = "",
+    val decision: String = "ACCEPT"
 )
 
 @Serializable

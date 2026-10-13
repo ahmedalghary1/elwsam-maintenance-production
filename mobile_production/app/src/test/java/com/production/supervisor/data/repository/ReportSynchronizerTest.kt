@@ -34,6 +34,10 @@ class ReportSynchronizerTest {
         ) { _, method, args ->
             when (method.name) {
                 "getReportSnapshot" -> snapshot
+                "updateReportSyncStatus" -> {
+                    snapshot = snapshot.copy(report = snapshot.report.copy(isSynced = args!![1] as Boolean, status = args[2] as String))
+                    Unit
+                }
                 "markSnapshotSynced" -> {
                     if (snapshot.report.localRevision == args!![1] as Long) {
                         snapshot = snapshot.copy(report = snapshot.report.copy(isSynced = true, status = args[2] as String))
@@ -59,7 +63,33 @@ class ReportSynchronizerTest {
             return send(body)
         }
         override suspend fun getBootstrap(factoryId: String?): Response<ProductionBootstrapDto> = error("Not used")
-        override suspend fun confirmHandover(body: ConfirmHandoverInputDto): Response<ShiftReportDto> = error("Not used")
+        var review: suspend (ConfirmHandoverInputDto) -> Response<ShiftReportDto> = { error("Not used") }
+        override suspend fun confirmHandover(body: ConfirmHandoverInputDto): Response<ShiftReportDto> = review(body)
+    }
+
+    @Test fun rejectionSendsReasonAndPreservesServerDecision() = runTest {
+        val local = LocalReport()
+        val api = FakeApi()
+        api.review = { input ->
+            assertEquals("REJECT", input.decision)
+            assertEquals("Quantity mismatch", input.handoverNotes)
+            assertEquals("stable-uuid", input.clientReportId)
+            val json = Json.encodeToString(input)
+            assertTrue(json.contains("handover_notes"))
+            assertTrue(json.contains("REJECT"))
+            Response.success(ShiftReportDto(1, input.clientReportId, "FIRST", reportDate = "2026-10-13", status = "REJECTED"))
+        }
+        assertTrue(ReportSynchronizer(api, local.dao).confirmHandover("stable-uuid", "Quantity mismatch", "REJECT").isSuccess)
+        assertEquals("REJECTED", local.snapshot.report.status)
+    }
+
+    @Test fun failedReviewDoesNotMarkReportReviewed() = runTest {
+        val local = LocalReport()
+        val api = FakeApi()
+        api.review = { throw java.io.IOException("offline") }
+        assertTrue(ReportSynchronizer(api, local.dao).confirmHandover("stable-uuid", "", "ACCEPT").isFailure)
+        assertEquals("DRAFT", local.snapshot.report.status)
+        assertFalse(local.snapshot.report.isSynced)
     }
 
     @Test fun changeDuringUploadStaysDirtyUntilItsOwnSnapshotIsSent() = runTest {

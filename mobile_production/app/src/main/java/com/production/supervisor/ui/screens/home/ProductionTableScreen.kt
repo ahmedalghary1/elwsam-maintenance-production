@@ -56,6 +56,10 @@ fun ProductionTableScreen(viewModel: ProductionHomeViewModel, onLogout: () -> Un
 @Composable
 private fun ProductionTableContent(viewModel: ProductionHomeViewModel, onLogout: () -> Unit) {
     val state by viewModel.uiState.collectAsState()
+    if (!state.handoverChecked || state.pendingHandover != null) {
+        com.production.supervisor.ui.screens.handover.HandoverGate(state, viewModel)
+        return
+    }
     val snackbar = remember { SnackbarHostState() }
     var showFaults by rememberSaveable { mutableStateOf(false) }
     var faults by rememberSaveable(state.currentReportId) { mutableStateOf("") }
@@ -116,6 +120,7 @@ private fun ProductionTableContent(viewModel: ProductionHomeViewModel, onLogout:
                         Text("المكتمل: ${state.assets.count { isMachineRecorded(reportEntries[it.id], state.stoppages) }} / ${state.assets.size}", fontSize = 13.sp)
                     }
                     Text("المشرف: ${state.currentUser?.name?.takeIf { it.isNotBlank() } ?: state.cachedSupervisorName.ifBlank { "—" }}", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    Text("التسليم إلى: ${state.currentUser?.nextShiftSupervisor?.name ?: "لم يتم تحديد المستلم من الداشبورد"}", fontSize = 13.sp)
                 }
             }
             if (state.isLoading) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }

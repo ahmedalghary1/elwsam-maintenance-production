@@ -90,6 +90,10 @@ private data class WorkingInput(
 @Composable
 fun FawryWizardScreen(viewModel: ProductionHomeViewModel, onLogout: () -> Unit) {
     val uiState by viewModel.uiState.collectAsState()
+    if (!uiState.handoverChecked || uiState.pendingHandover != null) {
+        com.production.supervisor.ui.screens.handover.HandoverGate(uiState, viewModel)
+        return
+    }
     val snackbar = remember { SnackbarHostState() }
     var showMenu by remember { mutableStateOf(false) }
     BackHandler(enabled = uiState.wizardStarted && !uiState.isSavingEntry && !uiState.isFinishingShift) {

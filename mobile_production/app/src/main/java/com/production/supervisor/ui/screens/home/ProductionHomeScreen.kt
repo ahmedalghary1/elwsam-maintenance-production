@@ -39,6 +39,18 @@ fun ProductionHomeScreen(
     viewModel: ProductionHomeViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) viewModel.checkIncomingHandover()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    if (!uiState.handoverChecked || uiState.pendingHandover != null) {
+        com.production.supervisor.ui.screens.handover.HandoverGate(uiState, viewModel)
+        return
+    }
     val snackbarHostState = remember { SnackbarHostState() }
 
     var showFinishShiftDialog by remember { mutableStateOf(false) }

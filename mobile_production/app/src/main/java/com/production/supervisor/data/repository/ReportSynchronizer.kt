@@ -48,13 +48,13 @@ class ReportSynchronizer @Inject constructor(
         }
     }
 
-    suspend fun confirmHandover(reportId: String, notes: String): Result<Unit> = uploadMutex.withLock {
+    suspend fun confirmHandover(reportId: String, notes: String, decision: String = "ACCEPT"): Result<Unit> = uploadMutex.withLock {
         try {
-            val response = api.confirmHandover(ConfirmHandoverInputDto(reportId, notes))
+            val response = api.confirmHandover(ConfirmHandoverInputDto(reportId, notes, decision))
             if (!response.isSuccessful) {
                 Result.failure(IllegalStateException("تعذر تأكيد استلام الوردية. حاول مرة أخرى."))
             } else {
-                dao.updateReportSyncStatus(reportId, synced = true, status = "CONFIRMED")
+                dao.updateReportSyncStatus(reportId, synced = true, status = response.body()?.status ?: if (decision == "REJECT") "REJECTED" else "CONFIRMED")
                 Result.success(Unit)
             }
         } catch (cancelled: CancellationException) {

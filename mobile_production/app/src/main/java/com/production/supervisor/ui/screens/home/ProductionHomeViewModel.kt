@@ -38,6 +38,7 @@ data class ProductionHomeUiState(
     val entries: Map<Int, MachineEntryEntity> = emptyMap(), // assetId -> entry
     val stoppages: List<StoppageEntity> = emptyList(),
     val pendingHandover: ShiftReportDto? = null,
+    val handoverChecked: Boolean = false,
     val isLoading: Boolean = false,
     val isSavingEntry: Boolean = false,
     val isFinishingShift: Boolean = false,
@@ -136,7 +137,7 @@ class ProductionHomeViewModel @Inject constructor(
 
     fun loadData(factoryId: String? = null) {
         if (_uiState.value.isLoading || _uiState.value.isSavingEntry || _uiState.value.isFinishingShift) return
-        _uiState.update { it.copy(isLoading = true) }
+        _uiState.update { it.copy(isLoading = true, handoverChecked = false) }
         viewModelScope.launch {
             try {
                 val bootstrapResult = repository.refreshBootstrap(factoryId)
@@ -149,6 +150,8 @@ class ProductionHomeViewModel @Inject constructor(
                             selectedShift = currentShift,
                             currentDate = bootstrap.serverDate,
                             pendingHandover = bootstrap.pendingHandover,
+                            handoverChecked = true,
+                            isHandoverDialogVisible = bootstrap.pendingHandover != null,
                             factoryName = bootstrap.factory.name,
                             factoryCode = bootstrap.factory.code,
                             selectedFactoryId = bootstrap.factory.id,
@@ -165,9 +168,13 @@ class ProductionHomeViewModel @Inject constructor(
                             selectedShift = currentShift,
                             factoryName = cachedFactoryName,
                             selectedFactoryId = cachedFactoryId,
-                            message = "تعذر التحديث. يمكنك إكمال التقرير بالبيانات المحفوظة على الهاتف."
+                            message = "اتصل بالإنترنت للتحقق من التقرير السابق قبل كتابة تقريرك. بياناتك المحفوظة موجودة."
                         )
                     }
+                }
+                if (!_uiState.value.handoverChecked || _uiState.value.pendingHandover != null) {
+                    _uiState.update { it.copy(isLoading = false) }
+                    return@launch
                 }
                 val report = repository.getOrCreateShiftReport(_uiState.value.currentDate, currentShift)
                 _uiState.update {
@@ -191,6 +198,15 @@ class ProductionHomeViewModel @Inject constructor(
 
     fun selectFactory(factory: com.production.supervisor.data.remote.dto.FactoryDto) {
         loadData(factory.id.toString())
+    }
+
+    fun checkIncomingHandover() {
+        if (!_uiState.value.handoverChecked || _uiState.value.isLoading) return
+        viewModelScope.launch {
+            repository.checkIncomingHandover().onSuccess { data ->
+                _uiState.update { it.copy(pendingHandover = data.pendingHandover, currentUser = data.user) }
+            }
+        }
     }
 
     fun setShift(shift: String) {
@@ -274,21 +290,24 @@ class ProductionHomeViewModel @Inject constructor(
         _uiState.update { it.copy(isHandoverDialogVisible = false) }
     }
 
-    fun confirmHandover(notes: String) {
+    fun confirmHandover(notes: String, decision: String = "ACCEPT") {
+        if (decision == "REJECT" && notes.isBlank()) return
         if (_uiState.value.isLoading || _uiState.value.isSavingEntry || _uiState.value.isFinishingShift) return
         val pending = _uiState.value.pendingHandover ?: return
         _uiState.update { it.copy(isLoading = true) }
         viewModelScope.launch {
-            val result = repository.confirmHandover(pending.clientReportId, notes)
+            val result = repository.confirmHandover(pending.clientReportId, notes, decision)
             result.onSuccess {
                 _uiState.update {
                     it.copy(
                         isLoading = false,
+                        handoverChecked = false,
                         pendingHandover = null,
                         isHandoverDialogVisible = false,
-                        message = "تم تأكيد استلام الوردية السابقة بنجاح"
+                        message = "تم تسجيل قرار مراجعة التقرير"
                     )
                 }
+                loadData()
             }.onFailure { ex ->
                 _uiState.update {
                     it.copy(
@@ -301,6 +320,11 @@ class ProductionHomeViewModel @Inject constructor(
     }
 
     fun finishShift(notes: String, drafts: Map<Int, MachineEntryEntity?> = emptyMap()) {
+        if (!canEditReport()) return
+        if (_uiState.value.currentUser?.nextShiftSupervisor == null) {
+            _uiState.update { it.copy(message = "حدد المشرف المستلم من الداشبورد ثم حدّث بيانات التطبيق قبل التسليم") }
+            return
+        }
         val state = _uiState.value
         if (state.isFinishingShift || state.isSavingEntry || state.isLoading || state.isReportFinished) return
         val allEntries = resolveReportEntries(state.entries, drafts)
@@ -337,6 +361,10 @@ class ProductionHomeViewModel @Inject constructor(
 
     private fun canEditReport(): Boolean {
         val state = _uiState.value
+        if (!state.handoverChecked || state.pendingHandover != null) {
+            _uiState.update { it.copy(message = "راجع تقرير المشرف السابق أولاً", isHandoverDialogVisible = it.pendingHandover != null) }
+            return false
+        }
         if (state.isReportFinished) {
             _uiState.update { it.copy(message = "تم تسليم هذا التقرير؛ يمكنك مراجعة البيانات") }
             return false

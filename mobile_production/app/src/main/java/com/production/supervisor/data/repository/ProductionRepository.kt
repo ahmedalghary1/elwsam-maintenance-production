@@ -27,6 +27,15 @@ class ProductionRepository @Inject constructor(
     }
 
     suspend fun getCachedShift(): String? = tokenManager.getAssignedShift()
+    suspend fun checkIncomingHandover(): Result<ProductionBootstrapDto> = try {
+        val response = api.getBootstrap(getCachedFactoryId()?.toString())
+        response.body()?.takeIf { response.isSuccessful }?.let { Result.success(it) }
+            ?: Result.failure(IllegalStateException("تعذر التحقق من التقرير السابق"))
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (error: Exception) {
+        Result.failure(error)
+    }
     suspend fun getCachedFactoryName(): String? = tokenManager.getSelectedFactoryName()
     suspend fun getCachedFactoryId(): Int? = tokenManager.getSelectedFactoryId()?.toIntOrNull()
 
@@ -260,8 +269,8 @@ class ProductionRepository @Inject constructor(
         }
     }
 
-    suspend fun confirmHandover(clientReportId: String, notes: String): Result<Unit> =
-        synchronizer.confirmHandover(clientReportId, notes)
+    suspend fun confirmHandover(clientReportId: String, notes: String, decision: String = "ACCEPT"): Result<Unit> =
+        synchronizer.confirmHandover(clientReportId, notes, decision)
 
     fun requestSync(clientReportId: String) = syncScheduler.requestSync(clientReportId)
 
