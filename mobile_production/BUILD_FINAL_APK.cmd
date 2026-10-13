@@ -51,6 +51,7 @@ if errorlevel 1 goto failed
 
 echo.
 echo [2/4] Compiling optimized release APK...
+call "%~dp0gradlew.bat" --stop >NUL 2>&1
 call "%~dp0gradlew.bat" --no-daemon clean assembleRelease --stacktrace
 if errorlevel 1 goto failed
 if not exist "%UNSIGNED_APK%" goto missing_unsigned
@@ -68,6 +69,7 @@ call "%APKSIGNER%" verify --verbose --print-certs "%SIGNED_TEMP%"
 if errorlevel 1 goto failed
 move /y "%SIGNED_TEMP%" "%FINAL_APK%" >NUL
 if errorlevel 1 goto failed
+copy /y "%FINAL_APK%" "%~dp0..\elwsam-production-release.apk" >NUL 2>&1
 del /q "%ALIGNED_APK%" 2>NUL
 
 echo.
