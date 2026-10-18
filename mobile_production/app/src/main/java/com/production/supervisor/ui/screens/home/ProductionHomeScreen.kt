@@ -29,6 +29,7 @@ import com.production.supervisor.data.local.entity.MachineEntryEntity
 import com.production.supervisor.ui.screens.entry.MachineEntrySheet
 import com.production.supervisor.ui.screens.handover.HandoverDialog
 import com.production.supervisor.ui.screens.stoppage.StoppageDialog
+import com.production.supervisor.ui.screens.stoppage.MachineStopReasonDialog
 import com.production.supervisor.ui.screens.wizard.FawryWizardScreen
 import com.production.supervisor.ui.theme.*
 
@@ -55,6 +56,7 @@ fun ProductionHomeScreen(
 
     var showFinishShiftDialog by remember { mutableStateOf(false) }
     var finishShiftNotes by remember { mutableStateOf("") }
+    var machineForStoppage by remember { mutableStateOf<AssetEntity?>(null) }
 
     if (uiState.isFawryMode) {
         ProductionTableScreen(
@@ -365,7 +367,13 @@ fun ProductionHomeScreen(
                     entry = entry,
                     hasStoppage = hasStoppage,
                     isStopped = isStopped,
-                    onToggleStopped = { viewModel.toggleMachineStopped(asset.id) },
+                    onToggleStopped = {
+                        if (isStopped) {
+                            viewModel.cancelMachineStopped(asset.id)
+                        } else {
+                            machineForStoppage = asset
+                        }
+                    },
                     onClick = { if (!uiState.isReportFinished && !uiState.isSavingEntry && !isStopped) viewModel.openMachineEntry(asset) }
                 )
             }
@@ -399,6 +407,22 @@ fun ProductionHomeScreen(
             currentReportId = uiState.currentReportId,
             onDismiss = { viewModel.closeStoppageDialog() },
             onConfirm = { stoppage -> viewModel.addStoppage(stoppage) }
+        )
+    }
+
+    // Machine Stop Reason Dialog (When clicking "الماكينة متوقفة")
+    if (machineForStoppage != null) {
+        val assetToStop = machineForStoppage!!
+        val currentStoppage = uiState.stoppages.findLast { it.assetId == assetToStop.id && it.clientReportId == uiState.currentReportId }
+        MachineStopReasonDialog(
+            asset = assetToStop,
+            initialReason = currentStoppage?.description ?: "",
+            initialDuration = currentStoppage?.durationMinutes?.takeIf { it > 0 } ?: 480,
+            onDismiss = { machineForStoppage = null },
+            onConfirm = { reason, duration, stoppageType ->
+                viewModel.setMachineStoppedWithReason(assetToStop.id, reason, duration, stoppageType)
+                machineForStoppage = null
+            }
         )
     }
 

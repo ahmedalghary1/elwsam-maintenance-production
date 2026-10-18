@@ -241,21 +241,78 @@ class ProductionHomeViewModel @Inject constructor(
         }
     }
 
+    fun setMachineStoppedWithReason(
+        assetId: Int,
+        reason: String,
+        durationMinutes: Int = 480,
+        stoppageType: String = "MACHINE_BREAKDOWN"
+    ) {
+        if (!canEditReport()) return
+        if (reason.isBlank()) {
+            _uiState.update { it.copy(message = "يجب إدخال سبب التوقف") }
+            return
+        }
+        val current = _uiState.value
+        val asset = current.assets.find { it.id == assetId } ?: return
+        val newSet = current.stoppedMachineAssetIds + assetId
+        val reportId = current.currentReportId
+        if (reportId.isNotBlank()) {
+            saveStoppedMachineIdsForReport(reportId, newSet)
+        }
+        val typeDisplay = when (stoppageType) {
+            "MOLD_CHANGE" -> "تغيير اسطمبة"
+            "MAINTENANCE" -> "صيانة دورية / طارئة"
+            "POWER_OUTAGE" -> "انقطاع كهرباء"
+            "OTHER" -> "أخرى"
+            else -> "عطل ماكينة"
+        }
+        val existingStoppage = current.stoppages.findLast { it.assetId == asset.id && it.clientReportId == reportId }
+        val stoppage = StoppageEntity(
+            id = existingStoppage?.id ?: 0,
+            clientReportId = reportId,
+            assetId = asset.id,
+            assetCode = asset.assetCode,
+            stoppageType = stoppageType,
+            stoppageTypeDisplay = typeDisplay,
+            description = reason.trim(),
+            durationMinutes = durationMinutes.coerceAtLeast(0),
+            actionTaken = "تم إيقاف الماكينة: ${reason.trim()}"
+        )
+        saveEntryLocally {
+            repository.addStoppage(stoppage)
+            _uiState.update { state ->
+                val updatedStoppages = state.stoppages.filterNot { (stoppage.id != 0L && it.id == stoppage.id) || (it.assetId == asset.id && it.clientReportId == reportId) } + stoppage
+                state.copy(
+                    stoppedMachineAssetIds = newSet,
+                    stoppages = updatedStoppages,
+                    message = "تم تسجيل توقف الماكينة ${asset.assetCode}: ${reason.trim()}"
+                )
+            }
+        }
+    }
+
+    fun cancelMachineStopped(assetId: Int) {
+        if (!canEditReport()) return
+        val current = _uiState.value
+        val asset = current.assets.find { it.id == assetId }
+        val newSet = current.stoppedMachineAssetIds - assetId
+        val reportId = current.currentReportId
+        if (reportId.isNotBlank()) {
+            saveStoppedMachineIdsForReport(reportId, newSet)
+        }
+        val machineCode = asset?.assetCode ?: "الماكينة"
+        _uiState.update { state ->
+            state.copy(
+                stoppedMachineAssetIds = newSet,
+                message = "تم إلغاء إيقاف $machineCode"
+            )
+        }
+    }
+
     fun toggleMachineStopped(assetId: Int) {
         if (!canEditReport()) return
-        _uiState.update { current ->
-            val newSet = if (current.stoppedMachineAssetIds.contains(assetId)) {
-                current.stoppedMachineAssetIds - assetId
-            } else {
-                current.stoppedMachineAssetIds + assetId
-            }
-            val reportId = current.currentReportId
-            if (reportId.isNotBlank()) {
-                saveStoppedMachineIdsForReport(reportId, newSet)
-            }
-            val machineCode = current.assets.find { it.id == assetId }?.assetCode ?: "الماكينة"
-            val msg = if (newSet.contains(assetId)) "تم تحديد $machineCode كمتوقفة" else "تم إلغاء إيقاف $machineCode"
-            current.copy(stoppedMachineAssetIds = newSet, message = msg)
+        if (_uiState.value.stoppedMachineAssetIds.contains(assetId)) {
+            cancelMachineStopped(assetId)
         }
     }
 

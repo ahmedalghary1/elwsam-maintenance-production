@@ -62,4 +62,26 @@ class ReportReadinessTest {
         assertTrue(isMachineAccountedFor(4, recorded, emptyList(), emptySet()))
         assertTrue(isMachineAccountedFor(4, recorded, emptyList(), setOf(4)))
     }
+
+    @Test fun allPackagingUnitDropdownOptionsCompleteMachine() {
+        val packagingOptions = listOf("كرتونة", "كيلو", "شيكاره", "قطعة")
+        for (unit in packagingOptions) {
+            val machineEntry = entry.copy(finalProductionQuantity = 10.0, finalProductionUnitName = unit)
+            assertTrue("Unit $unit should complete the machine", isMachineRecorded(machineEntry, emptyList()))
+        }
+    }
+
+    @Test fun machineWithReasonStoppageAccountedFor() {
+        val stoppageWithReason = StoppageEntity(
+            clientReportId = "report",
+            assetId = 4,
+            assetCode = "M4",
+            stoppageType = "MACHINE_BREAKDOWN",
+            stoppageTypeDisplay = "عطل ماكينة",
+            description = "عطل كهربائي في الموتور",
+            durationMinutes = 480
+        )
+        assertTrue(isMachineRecorded(entry, listOf(stoppageWithReason)))
+        assertTrue(isMachineAccountedFor(4, null, listOf(stoppageWithReason), setOf(4)))
+    }
 }
