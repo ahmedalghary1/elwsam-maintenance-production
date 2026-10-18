@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -470,10 +472,88 @@ private fun MachineTable(
                 TableDropdown("العبوة", defaults.optString("packaging_type"), packaging,
                     packagingOptions, enabled) { packaging = it; changed = true }
                 HorizontalDivider()
-                Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("التشغيل", Modifier.weight(1f), fontSize = 13.sp)
-                    FilterChip(mode == "AUTO", { mode = "AUTO"; changed = true }, { Text("أوتو", fontSize = 13.sp) }, enabled = enabled)
-                    FilterChip(mode == "MANUAL", { mode = "MANUAL"; changed = true }, { Text("يدوي", fontSize = 13.sp) }, enabled = enabled)
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("وضع التشغيل:", Modifier.weight(1f), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B))
+                    FilterChip(
+                        selected = mode == "AUTO",
+                        onClick = { mode = "AUTO"; changed = true },
+                        enabled = enabled,
+                        leadingIcon = if (mode == "AUTO") {
+                            {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        } else null,
+                        label = {
+                            Text(
+                                text = "أوتو",
+                                fontSize = 13.sp,
+                                fontWeight = if (mode == "AUTO") FontWeight.Bold else FontWeight.Medium
+                            )
+                        },
+                        colors = FilterChipDefaults.filterChipColors(
+                            containerColor = Color(0xFFF1F5F9),
+                            labelColor = Color(0xFF64748B),
+                            selectedContainerColor = Color(0xFF15803D),
+                            selectedLabelColor = Color.White,
+                            disabledContainerColor = Color(0xFFF1F5F9),
+                            disabledLabelColor = Color(0xFF94A3B8)
+                        ),
+                        border = FilterChipDefaults.filterChipBorder(
+                            enabled = enabled,
+                            selected = mode == "AUTO",
+                            borderColor = Color(0xFFCBD5E1),
+                            selectedBorderColor = Color(0xFF14532D),
+                            borderWidth = if (mode == "AUTO") 2.dp else 1.dp
+                        )
+                    )
+                    FilterChip(
+                        selected = mode == "MANUAL",
+                        onClick = { mode = "MANUAL"; changed = true },
+                        enabled = enabled,
+                        leadingIcon = if (mode == "MANUAL") {
+                            {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        } else null,
+                        label = {
+                            Text(
+                                text = "يدوي",
+                                fontSize = 13.sp,
+                                fontWeight = if (mode == "MANUAL") FontWeight.Bold else FontWeight.Medium
+                            )
+                        },
+                        colors = FilterChipDefaults.filterChipColors(
+                            containerColor = Color(0xFFF1F5F9),
+                            labelColor = Color(0xFF64748B),
+                            selectedContainerColor = Color(0xFFEA580C),
+                            selectedLabelColor = Color.White,
+                            disabledContainerColor = Color(0xFFF1F5F9),
+                            disabledLabelColor = Color(0xFF94A3B8)
+                        ),
+                        border = FilterChipDefaults.filterChipBorder(
+                            enabled = enabled,
+                            selected = mode == "MANUAL",
+                            borderColor = Color(0xFFCBD5E1),
+                            selectedBorderColor = Color(0xFF9A3412),
+                            borderWidth = if (mode == "MANUAL") 2.dp else 1.dp
+                        )
+                    )
                 }
                 TableCell("كمية الإنتاج", "", quantity, enabled, true) { quantity = it; changed = true }
                 TableDropdown("وحدة الإنتاج", defaults.optString("final_production_unit_name"), unit, packagingOptions, enabled) { unit = it; changed = true }

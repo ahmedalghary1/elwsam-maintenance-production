@@ -330,9 +330,82 @@ private fun WorkingMachineView(asset: AssetEntity, initial: MachineEntryEntity?,
                         if (units.isNotEmpty()) ProductionOptionSelector("وحدة الإنتاج", units, unit, { unit = it }, allowNone = false)
                         ProductionOptionSelector("الخامة", materials, material, { material = it }, allowNone = false)
                         ProductionOptionSelector("العبوة", packagingOptions, packaging, { packaging = it }, allowNone = false)
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            FilterChip(selected = mode == "AUTO", onClick = { mode = "AUTO" }, label = { Text("تلقائي", fontSize = 16.sp) })
-                            FilterChip(selected = mode == "MANUAL", onClick = { mode = "MANUAL" }, label = { Text("يدوي", fontSize = 16.sp) })
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("وضع التشغيل:", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E293B))
+                            FilterChip(
+                                selected = mode == "AUTO",
+                                onClick = { mode = "AUTO" },
+                                modifier = Modifier.weight(1f).heightIn(min = 44.dp),
+                                leadingIcon = if (mode == "AUTO") {
+                                    {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = null,
+                                            tint = Color.White,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                } else null,
+                                label = {
+                                    Text(
+                                        text = "أوتو",
+                                        fontSize = 15.sp,
+                                        fontWeight = if (mode == "AUTO") FontWeight.Bold else FontWeight.Medium
+                                    )
+                                },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    containerColor = Color(0xFFF1F5F9),
+                                    labelColor = Color(0xFF64748B),
+                                    selectedContainerColor = Color(0xFF15803D),
+                                    selectedLabelColor = Color.White
+                                ),
+                                border = FilterChipDefaults.filterChipBorder(
+                                    enabled = true,
+                                    selected = mode == "AUTO",
+                                    borderColor = Color(0xFFCBD5E1),
+                                    selectedBorderColor = Color(0xFF14532D),
+                                    borderWidth = if (mode == "AUTO") 2.dp else 1.dp
+                                )
+                            )
+                            FilterChip(
+                                selected = mode == "MANUAL",
+                                onClick = { mode = "MANUAL" },
+                                modifier = Modifier.weight(1f).heightIn(min = 44.dp),
+                                leadingIcon = if (mode == "MANUAL") {
+                                    {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = null,
+                                            tint = Color.White,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                } else null,
+                                label = {
+                                    Text(
+                                        text = "يدوي",
+                                        fontSize = 15.sp,
+                                        fontWeight = if (mode == "MANUAL") FontWeight.Bold else FontWeight.Medium
+                                    )
+                                },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    containerColor = Color(0xFFF1F5F9),
+                                    labelColor = Color(0xFF64748B),
+                                    selectedContainerColor = Color(0xFFEA580C),
+                                    selectedLabelColor = Color.White
+                                ),
+                                border = FilterChipDefaults.filterChipBorder(
+                                    enabled = true,
+                                    selected = mode == "MANUAL",
+                                    borderColor = Color(0xFFCBD5E1),
+                                    selectedBorderColor = Color(0xFF9A3412),
+                                    borderWidth = if (mode == "MANUAL") 2.dp else 1.dp
+                                )
+                            )
                         }
                         OutlinedTextField(notes, { notes = it }, label = { Text("ملاحظات (اختياري)") }, modifier = Modifier.fillMaxWidth(), minLines = 2)
                     }

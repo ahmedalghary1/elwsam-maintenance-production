@@ -799,7 +799,7 @@ fun MachineCard(
                             Icon(Icons.Outlined.GridOn, contentDescription = null, modifier = Modifier.size(12.dp), tint = FactoryTextMuted)
                             Spacer(modifier = Modifier.width(3.dp))
                             Text(
-                                text = "الحالية: ${entry.currentCavities} • الأصلية: ${entry.originalCavities} | ${if (entry.operationMode == "AUTO") "تلقائي" else "يدوي"}",
+                                text = "الحالية: ${entry.currentCavities} • الأصلية: ${entry.originalCavities} | ${if (entry.operationMode == "AUTO") "أوتو" else "يدوي"}",
                                 fontSize = 11.sp,
                                 color = FactoryTextMuted
                             )

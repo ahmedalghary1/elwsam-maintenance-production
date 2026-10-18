@@ -703,10 +703,15 @@ fun MachineEntrySheet(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
                     ) {
-                        Icon(Icons.Outlined.SmartToy, contentDescription = null, modifier = Modifier.size(20.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
+                        if (operationMode == "AUTO") {
+                            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(20.dp), tint = Color.White)
+                            Spacer(modifier = Modifier.width(6.dp))
+                        } else {
+                            Icon(Icons.Outlined.SmartToy, contentDescription = null, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                        }
                         Column(horizontalAlignment = Alignment.Start) {
-                            Text("تلقائي", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            Text("أوتو", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -728,10 +733,15 @@ fun MachineEntrySheet(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
                     ) {
-                        Icon(Icons.Outlined.PanTool, contentDescription = null, modifier = Modifier.size(20.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
+                        if (operationMode == "MANUAL") {
+                            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(20.dp), tint = Color.White)
+                            Spacer(modifier = Modifier.width(6.dp))
+                        } else {
+                            Icon(Icons.Outlined.PanTool, contentDescription = null, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                        }
                         Column(horizontalAlignment = Alignment.Start) {
-                            Text("يدوي", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            Text("يدوي", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
