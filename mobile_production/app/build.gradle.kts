@@ -14,7 +14,7 @@ android {
     defaultConfig {
         applicationId = "com.production.supervisor"
         minSdk = 23
-        targetSdk = 36
+        targetSdk = 34
         versionCode = 6
         versionName = "1.4.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

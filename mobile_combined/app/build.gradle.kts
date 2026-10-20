@@ -13,7 +13,7 @@ android {
     defaultConfig {
         applicationId = "com.elwsam.operations"
         minSdk = 23
-        targetSdk = 36
+        targetSdk = 34
         versionCode = 2
         versionName = "1.0.1"
     }

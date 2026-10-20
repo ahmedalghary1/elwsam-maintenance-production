@@ -65,7 +65,7 @@ if errorlevel 1 goto failed
 echo.
 echo [4/4] Signing and verifying APK...
 echo Enter the release-key password when requested.
-call "%APKSIGNER%" sign --ks "%KEYSTORE%" --ks-pass pass:elwsam123 --ks-key-alias maintenance --out "%SIGNED_TEMP%" "%ALIGNED_APK%"
+call "%APKSIGNER%" sign --v1-signing-enabled true --v2-signing-enabled true --ks "%KEYSTORE%" --ks-pass pass:elwsam123 --ks-key-alias maintenance --out "%SIGNED_TEMP%" "%ALIGNED_APK%"
 if errorlevel 1 goto failed
 call "%APKSIGNER%" verify --verbose --print-certs "%SIGNED_TEMP%"
 if errorlevel 1 goto failed
