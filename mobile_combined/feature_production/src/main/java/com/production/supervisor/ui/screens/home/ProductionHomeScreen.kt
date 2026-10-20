@@ -1,0 +1,889 @@
+package com.production.supervisor.ui.screens.home
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.automirrored.outlined.ArrowForward
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import com.production.supervisor.data.local.entity.AssetEntity
+
+import com.production.supervisor.data.local.entity.MachineEntryEntity
+import com.production.supervisor.ui.screens.entry.MachineEntrySheet
+import com.production.supervisor.ui.screens.handover.HandoverDialog
+import com.production.supervisor.ui.screens.stoppage.StoppageDialog
+import com.production.supervisor.ui.screens.stoppage.MachineStopReasonDialog
+import com.production.supervisor.ui.screens.wizard.FawryWizardScreen
+import com.production.supervisor.ui.theme.*
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ProductionHomeScreen(
+    onLogout: () -> Unit,
+    viewModel: ProductionHomeViewModel = hiltViewModel()
+) {
+    val uiState by viewModel.uiState.collectAsState()
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) viewModel.checkIncomingHandover()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    if (!uiState.handoverChecked || uiState.pendingHandover != null) {
+        com.production.supervisor.ui.screens.handover.HandoverGate(uiState, viewModel)
+        return
+    }
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    var showFinishShiftDialog by remember { mutableStateOf(false) }
+    var finishShiftNotes by remember { mutableStateOf("") }
+    var machineForStoppage by remember { mutableStateOf<AssetEntity?>(null) }
+
+    if (uiState.isFawryMode) {
+        ProductionTableScreen(
+            viewModel = viewModel,
+            onLogout = onLogout
+        )
+        return
+    }
+    LaunchedEffect(uiState.message) {
+        uiState.message?.let {
+            viewModel.clearMessage()
+            snackbarHostState.showSnackbar(it)
+        }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "نظام الإنتاج والأعطال",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 17.sp,
+                                color = Color.White
+                            )
+                            if (uiState.factoryName.isNotBlank()) {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Surface(
+                                    color = Color.White.copy(alpha = 0.2f),
+                                    shape = RoundedCornerShape(6.dp)
+                                ) {
+                                    Text(
+                                        text = uiState.factoryName,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                    )
+                                }
+                            }
+                        }
+                        Text(
+                            text = uiState.currentDate,
+                            fontSize = 11.sp,
+                            color = Color(0xFFCBD5E1)
+                        )
+                    }
+                },
+                actions = {
+                    FilledTonalButton(
+                        onClick = { viewModel.toggleFawryMode(true) },
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = FactoryGreen,
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                        modifier = Modifier.height(34.dp)
+                    ) {
+                        Text("تسجيل مبسط", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                    IconButton(onClick = { viewModel.loadData() }) {
+                        Icon(Icons.Default.Refresh, contentDescription = "تحديث", tint = Color.White)
+                    }
+                    IconButton(onClick = { viewModel.logout(onLogout) }) {
+                        Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = "تسجيل خروج", tint = Color(0xFFFCA5A5))
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = FactoryNavy)
+            )
+        },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        bottomBar = {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shadowElevation = 8.dp,
+                color = FactorySurface,
+                border = androidx.compose.foundation.BorderStroke(1.dp, FactoryCardBorder)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Button(
+                        onClick = { viewModel.openStoppageDialog() },
+                        enabled = !uiState.isReportFinished && !uiState.isSavingEntry && !uiState.isFinishingShift,
+                        modifier = Modifier.weight(1f).height(48.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = FactoryOrange),
+                        elevation = ButtonDefaults.buttonElevation(defaultElevation = 1.dp)
+                    ) {
+                        Icon(Icons.Outlined.ReportProblem, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color.White)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("تسجيل عطل", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color.White)
+                    }
+
+                    val isShiftReady = uiState.assets.isNotEmpty() && uiState.assets.all {
+                        isMachineAccountedFor(it.id, uiState.entries[it.id], uiState.stoppages, uiState.stoppedMachineAssetIds)
+                    } && !uiState.isReportFinished && !uiState.isSavingEntry && !uiState.isFinishingShift
+
+                    Button(
+                        onClick = { showFinishShiftDialog = true },
+                        enabled = isShiftReady,
+                        modifier = Modifier.weight(1f).height(48.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = FactoryGreen,
+                            contentColor = Color.White,
+                            disabledContainerColor = Color(0xFFE2E8F0),
+                            disabledContentColor = Color(0xFF94A3B8)
+                        ),
+                        elevation = ButtonDefaults.buttonElevation(defaultElevation = 1.dp)
+                    ) {
+                        Icon(Icons.Outlined.AssignmentTurnedIn, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color.White)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("تسليم الوردية", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = if (isShiftReady) Color.White else Color(0xFF94A3B8))
+                    }
+                }
+            }
+        }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(FactoryBg)
+                .padding(padding)
+                .padding(horizontal = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            item { Spacer(modifier = Modifier.height(4.dp)) }
+
+            // 1. Handover Alert Banner if pending
+            uiState.pendingHandover?.let { pending ->
+                item {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { viewModel.openHandoverDialog() },
+                        colors = CardDefaults.cardColors(containerColor = FactoryLightOrange),
+                        shape = RoundedCornerShape(14.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, FactoryOrange.copy(alpha = 0.6f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                             Box(
+                                  modifier = Modifier
+                                      .size(42.dp)
+                                      .background(FactoryOrange.copy(alpha = 0.2f), CircleShape),
+                                  contentAlignment = Alignment.Center
+                             ) {
+                                 Icon(
+                                     Icons.Outlined.Handshake,
+                                     contentDescription = null,
+                                     tint = FactoryOrange,
+                                     modifier = Modifier.size(24.dp)
+                                 )
+                             }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "وردية بانتظار تأكيد استلامك!",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp,
+                                    color = FactoryDark
+                                )
+                                Text(
+                                    text = "الزميل المسلّم: ${pending.supervisorName} (${pending.shiftDisplay})",
+                                    fontSize = 12.sp,
+                                    color = FactoryTextSecondary
+                                )
+                            }
+                            Button(
+                                onClick = { viewModel.openHandoverDialog() },
+                                colors = ButtonDefaults.buttonColors(containerColor = FactoryGreen),
+                                shape = RoundedCornerShape(10.dp),
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                            ) {
+                                Text("استلام", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color.White)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 2. Shift Badge (إظهار وردية العمل المحددة فقط)
+            item {
+                val currentShiftName = when (uiState.selectedShift) {
+                    "FIRST" -> "الوردية 1 (صباحية)"
+                    "SECOND" -> "الوردية 2 (مسائية)"
+                    "THIRD" -> "الوردية 3 (ليلية)"
+                    else -> uiState.selectedShift
+                }
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = FactorySurface),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, FactoryCardBorder)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("⏰", fontSize = 20.sp)
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "وردية العمل المحددة:",
+                                fontSize = 11.sp,
+                                color = FactoryTextMuted
+                            )
+                            Text(
+                                text = currentShiftName,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp,
+                                color = FactoryDark
+                            )
+                        }
+                    }
+                }
+            }
+
+            // 3. Quick Action: Friday Prayer Button (يوم الجمعة فقط)
+            val isFriday = try {
+                java.time.LocalDate.now().dayOfWeek == java.time.DayOfWeek.FRIDAY
+            } catch (_: Exception) {
+                false
+            }
+            if (isFriday) {
+                item {
+                    Button(
+                        onClick = { viewModel.addFridayPrayerStoppage() },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = FactoryTeal),
+                        elevation = ButtonDefaults.buttonElevation(defaultElevation = 1.dp)
+                    ) {
+                        Icon(Icons.Outlined.PauseCircle, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color.White)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("إيقاف صلاة الجمعة لجميع الماكينات (60 دقيقة)", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color.White)
+                    }
+                }
+            }
+
+            // 4. Statistics Banner
+            item {
+                val recordedCount = uiState.assets.count { isMachineAccountedFor(it.id, uiState.entries[it.id], uiState.stoppages, uiState.stoppedMachineAssetIds) }
+                val stoppedCount = uiState.assets.count { uiState.stoppedMachineAssetIds.contains(it.id) }
+                val totalMachines = uiState.assets.size
+                val totalWeight = uiState.entries.values.sumOf { it.finalProductionWeightKg }
+
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = FactorySurfaceVariant),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, FactoryCardBorder),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (stoppedCount > 0) "المسجل: $recordedCount من $totalMachines ($stoppedCount متوقفة)" else "المسجل: $recordedCount من $totalMachines ماكينة",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            color = FactoryTextPrimary
+                        )
+                        Text(
+                            text = "المحوّل إلى كجم: $totalWeight كجم",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            color = FactoryGreen
+                        )
+                    }
+                }
+            }
+
+            // 5. Machines List Header
+            item {
+                Text(
+                    text = "الماكينات (اضغط على الماكينة لتسجيل الإنتاج):",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = FactoryDark
+                )
+            }
+
+            // 6. Machines List Items
+            items(uiState.assets, key = { it.id }) { asset ->
+                val entry = uiState.entries[asset.id]
+                val hasStoppage = uiState.stoppages.any { it.assetId == asset.id }
+                val isStopped = uiState.stoppedMachineAssetIds.contains(asset.id)
+
+                MachineCard(
+                    asset = asset,
+                    entry = entry,
+                    hasStoppage = hasStoppage,
+                    isStopped = isStopped,
+                    onToggleStopped = {
+                        if (isStopped) {
+                            viewModel.cancelMachineStopped(asset.id)
+                        } else {
+                            machineForStoppage = asset
+                        }
+                    },
+                    onClick = { if (!uiState.isReportFinished && !uiState.isSavingEntry && !isStopped) viewModel.openMachineEntry(asset) }
+                )
+            }
+
+            item { Spacer(modifier = Modifier.height(16.dp)) }
+        }
+    }
+
+    // Machine Entry Sheet
+    uiState.selectedAssetForEntry?.let { asset ->
+        val existingEntry = uiState.entries[asset.id]
+        key(asset.id, uiState.currentReportId) {
+            MachineEntrySheet(
+                asset = asset,
+                currentReportId = uiState.currentReportId,
+                existingEntry = existingEntry,
+                operators = uiState.operators,
+                products = uiState.products,
+                productionOptions = uiState.productionOptions,
+                onDismiss = { viewModel.closeMachineEntry() },
+                onSave = { entry -> viewModel.saveMachineEntry(entry) },
+                isSaving = uiState.isSavingEntry
+            )
+        }
+    }
+
+    // Stoppage Dialog
+    if (uiState.isStoppageDialogVisible) {
+        StoppageDialog(
+            assets = uiState.assets,
+            currentReportId = uiState.currentReportId,
+            onDismiss = { viewModel.closeStoppageDialog() },
+            onConfirm = { stoppage -> viewModel.addStoppage(stoppage) }
+        )
+    }
+
+    // Machine Stop Reason Dialog (When clicking "الماكينة متوقفة")
+    if (machineForStoppage != null) {
+        val assetToStop = machineForStoppage!!
+        val currentStoppage = uiState.stoppages.findLast { it.assetId == assetToStop.id && it.clientReportId == uiState.currentReportId }
+        MachineStopReasonDialog(
+            asset = assetToStop,
+            initialReason = currentStoppage?.description ?: "",
+            initialDuration = currentStoppage?.durationMinutes?.takeIf { it > 0 } ?: 480,
+            onDismiss = { machineForStoppage = null },
+            onConfirm = { reason, duration, stoppageType ->
+                viewModel.setMachineStoppedWithReason(assetToStop.id, reason, duration, stoppageType)
+                machineForStoppage = null
+            }
+        )
+    }
+
+    // Handover Dialog
+    if (uiState.isHandoverDialogVisible && uiState.pendingHandover != null) {
+        HandoverDialog(
+            pendingReport = uiState.pendingHandover!!,
+            onDismiss = { viewModel.closeHandoverDialog() },
+            onConfirm = { notes -> viewModel.confirmHandover(notes) },
+            onReject = { notes -> viewModel.confirmHandover(notes, "REJECT") },
+            busy = uiState.isLoading,
+            error = uiState.message
+        )
+    }
+
+    // Finish Shift Dialog
+    if (showFinishShiftDialog) {
+        val currentShiftName = when (uiState.selectedShift) {
+            "FIRST" -> "الوردية الأولى (صباحية)"
+            "SECOND" -> "الوردية الثانية (مسائية)"
+            "THIRD" -> "الوردية الثالثة (ليلية)"
+            else -> uiState.selectedShift
+        }
+        val nextShiftName = when (uiState.selectedShift) {
+            "FIRST" -> "الوردية الثانية (مسائية)"
+            "SECOND" -> "الوردية الثالثة (ليلية)"
+            "THIRD" -> "الوردية الأولى (صباحية)"
+            else -> "الوردية التالية"
+        }
+        val nextSupervisor = uiState.currentUser?.nextShiftSupervisor
+
+        AlertDialog(
+            onDismissRequest = { showFinishShiftDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.Handshake, contentDescription = null, tint = FactoryOrange, modifier = Modifier.size(24.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("تسليم الوردية للمشرف التالي", fontWeight = FontWeight.Bold, color = FactoryNavy, fontSize = 17.sp)
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    // Handover routing card
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = FactoryLightOrange.copy(alpha = 0.5f)),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, FactoryOrange.copy(alpha = 0.4f)),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("الوردية المسلَّمة: ", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = FactoryDark)
+                                Text(currentShiftName, fontSize = 12.sp, color = FactoryTextSecondary)
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("الوردية المستلمة: ", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = FactoryDark)
+                                Text(nextShiftName, fontSize = 12.sp, color = FactoryNavy, fontWeight = FontWeight.SemiBold)
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("المشرف المستلم: ", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = FactoryDark)
+                                if (nextSupervisor != null) {
+                                    Text("${nextSupervisor.name} ${if (nextSupervisor.phone.isNotBlank()) "(${nextSupervisor.phone})" else ""}", fontSize = 12.sp, color = FactoryGreenDark, fontWeight = FontWeight.Bold)
+                                } else {
+                                    Text("سيظهر التقرير تلقائياً لمشرف الوردية القادمة فور دخوله", fontSize = 11.sp, color = FactoryTextSecondary)
+                                }
+                            }
+                        }
+                    }
+
+                    Text(
+                        text = "سيتم إنهاء الوردية الحالية وتحويل التقرير للاستلام ليقوم المشرف القادم بمراجعة الماكينات واعتمادها.",
+                        fontSize = 12.sp,
+                        color = FactoryTextSecondary
+                    )
+
+                    OutlinedTextField(
+                        value = finishShiftNotes,
+                        onValueChange = { finishShiftNotes = it },
+                        label = { Text("ملاحظات تسليم الوردية للمشرف القادم (اختياري)") },
+                        leadingIcon = { Icon(Icons.Outlined.EditNote, contentDescription = null, tint = FactoryNavy) },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp)
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.finishShift(finishShiftNotes)
+                        showFinishShiftDialog = false
+                    },
+                    enabled = !uiState.isFinishingShift && !uiState.isSavingEntry && !uiState.isReportFinished && uiState.assets.all { isMachineAccountedFor(it.id, uiState.entries[it.id], uiState.stoppages, uiState.stoppedMachineAssetIds) },
+                    colors = ButtonDefaults.buttonColors(containerColor = FactoryGreen),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Icon(Icons.Outlined.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color.White)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("تسليم الوردية الآن", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showFinishShiftDialog = false }) {
+                    Text("إلغاء")
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun MachineCard(
+    asset: AssetEntity,
+    entry: MachineEntryEntity?,
+    hasStoppage: Boolean,
+    isStopped: Boolean = false,
+    onToggleStopped: (() -> Unit)? = null,
+    onClick: () -> Unit
+) {
+    val isRecorded = entry != null
+
+    val borderColor = when {
+        isStopped -> FactoryOrange
+        hasStoppage -> FactoryOrange
+        isRecorded -> FactoryGreen.copy(alpha = 0.6f)
+        else -> FactoryCardBorder
+    }
+
+    val statusBg = when {
+        isStopped -> FactoryLightOrange
+        hasStoppage -> FactoryLightOrange
+        isRecorded -> FactoryLightGreen
+        else -> FactorySurfaceVariant
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .border(1.2.dp, borderColor, RoundedCornerShape(16.dp)),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = FactorySurface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            // Row 1: Code and Status Badge
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .background(if (isStopped) FactoryOrangeDark else if (isRecorded) FactoryGreen else FactoryNavy, RoundedCornerShape(10.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = asset.assetCode,
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = asset.productionTitle,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = FactoryDark
+                        )
+                        Text(
+                            text = asset.assetTypeDisplay,
+                            fontSize = 11.sp,
+                            color = FactoryTextMuted
+                        )
+                    }
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (onToggleStopped != null) {
+                        FilterChip(
+                            selected = isStopped,
+                            onClick = onToggleStopped,
+                            label = { Text(if (isStopped) "متوقفة" else "متوقفة؟", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = FactoryLightOrange,
+                                selectedLabelColor = FactoryOrangeDark
+                            )
+                        )
+                    }
+                    // Status Badge
+                    Box(
+                        modifier = Modifier
+                            .background(statusBg, RoundedCornerShape(20.dp))
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            when {
+                                isStopped -> Icon(
+                                    Icons.Outlined.Warning,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(13.dp),
+                                    tint = FactoryOrangeDark
+                                )
+                                hasStoppage -> Icon(
+                                    Icons.Outlined.Warning,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(13.dp),
+                                    tint = FactoryOrangeDark
+                                )
+                                isRecorded -> Icon(
+                                    Icons.Outlined.CheckCircle,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(13.dp),
+                                    tint = FactoryGreenDark
+                                )
+                                else -> Icon(
+                                    Icons.Outlined.RadioButtonUnchecked,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(13.dp),
+                                    tint = FactoryTextMuted
+                                )
+                            }
+                            Text(
+                                text = when {
+                                    isStopped -> "متوقفة"
+                                    hasStoppage -> "يوجد توقف"
+                                    isRecorded -> "تم التسجيل"
+                                    else -> "لم يسجل"
+                                },
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = when {
+                                    isStopped -> FactoryOrangeDark
+                                    hasStoppage -> FactoryOrangeDark
+                                    isRecorded -> FactoryGreenDark
+                                    else -> FactoryTextMuted
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Row 2: Machine Specifications (Actual if recorded, otherwise Dashboard default)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                if (entry != null) {
+                    val cavitiesVal = if (entry.currentCavities != entry.originalCavities) {
+                        "${entry.currentCavities}/${entry.originalCavities}"
+                    } else {
+                        "${entry.originalCavities}"
+                    }
+                    SpecBadge(label = "اللقم", value = cavitiesVal)
+                    val cooling = entry.coolingTimeSeconds
+                    if (cooling > 0) {
+                        SpecBadge(label = "تبريد", value = "${cooling}ث")
+                    }
+                    val cycle = entry.cycleTimeSeconds
+                    if (cycle > 0) {
+                        SpecBadge(label = "دورة", value = "${cycle}ث")
+                    }
+                    val target = if (entry.targetCycleProduction > 0) entry.targetCycleProduction else asset.targetCycleProduction
+                    if (target > 0) {
+                        SpecBadge(label = "مستهدف", value = "${target.toInt()} كجم")
+                    }
+                } else {
+                    SpecBadge(label = "اللقم", value = "${asset.originalCavities}")
+                    if (asset.coolingTimeSeconds > 0) {
+                        SpecBadge(label = "تبريد", value = "${asset.coolingTimeSeconds}ث")
+                    }
+                    if (asset.cycleTimeSeconds > 0) {
+                        SpecBadge(label = "دورة", value = "${asset.cycleTimeSeconds}ث")
+                    }
+                    if (asset.targetCycleProduction > 0) {
+                        SpecBadge(label = "مستهدف", value = "${asset.targetCycleProduction.toInt()} كجم")
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Row 3: Details
+            if (entry != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.Person, contentDescription = null, modifier = Modifier.size(13.dp), tint = FactoryTextMuted)
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text(
+                                text = "${entry.operatorName.ifBlank { "غير محدد" }}",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = FactoryTextSecondary
+                            )
+                            if (entry.operatorChanged) {
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .background(FactoryLightOrange, RoundedCornerShape(4.dp))
+                                        .padding(horizontal = 4.dp, vertical = 1.dp)
+                                ) {
+                                    Text("عامل مختلف", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = FactoryTextSecondary)
+                                }
+                            }
+                        }
+                        if (entry.operatorChanged && entry.originalOperatorName.isNotBlank()) {
+                            Text(
+                                text = "كان: ${entry.originalOperatorName} ➔ ${entry.operatorName}",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = FactoryOrangeDark
+                            )
+                        }
+
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.Inventory2, contentDescription = null, modifier = Modifier.size(13.dp), tint = FactoryNavy)
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text(
+                                text = "${entry.productName.ifBlank { "غير محدد" }}",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = FactoryDark,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            if (entry.productChanged) {
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .background(FactoryLightOrange, RoundedCornerShape(4.dp))
+                                        .padding(horizontal = 4.dp, vertical = 1.dp)
+                                ) {
+                                    Text("منتج مختلف", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = FactoryTextSecondary)
+                                }
+                            }
+                        }
+                        if (entry.productChanged && entry.originalProductName.isNotBlank()) {
+                            Text(
+                                text = "كان: ${entry.originalProductName} ➔ ${entry.productName}",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = FactoryOrangeDark
+                            )
+                        }
+                    }
+
+                    Column(horizontalAlignment = Alignment.End) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.Scale, contentDescription = null, modifier = Modifier.size(13.dp), tint = FactoryGreenDark)
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text(
+                                text = "${entry.finalProductionQuantity} ${entry.finalProductionUnitName}",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = FactoryGreenDark
+                            )
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.GridOn, contentDescription = null, modifier = Modifier.size(12.dp), tint = FactoryTextMuted)
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text(
+                                text = "الحالية: ${entry.currentCavities} • الأصلية: ${entry.originalCavities} | ${if (entry.operationMode == "AUTO") "أوتو" else "يدوي"}",
+                                fontSize = 11.sp,
+                                color = FactoryTextMuted
+                            )
+                        }
+                    }
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.Inventory2, contentDescription = null, modifier = Modifier.size(13.dp), tint = FactoryNavy)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "المنتج المعتاد: ${asset.defaultProductName ?: "غير محدد"}",
+                                fontSize = 12.sp,
+                                fontWeight = if (asset.defaultProductName != null) FontWeight.Bold else FontWeight.Normal,
+                                color = if (asset.defaultProductName != null) FactoryDark else FactoryTextMuted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        if (!asset.defaultOperatorName.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Outlined.Person, contentDescription = null, modifier = Modifier.size(13.dp), tint = FactoryTextMuted)
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "العامل المعتاد: ${asset.defaultOperatorName}",
+                                    fontSize = 11.sp,
+                                    color = FactoryTextSecondary
+                                )
+                            }
+                        }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "اضغط للتسجيل",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = FactoryOrangeDark
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Icon(
+                            Icons.AutoMirrored.Outlined.ArrowForward,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = FactoryOrangeDark
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SpecBadge(label: String, value: String) {
+    Surface(
+        color = Color(0xFFF1F5F9),
+        shape = RoundedCornerShape(6.dp),
+        border = androidx.compose.foundation.BorderStroke(0.5.dp, Color(0xFFCBD5E1))
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "$label: ",
+                fontSize = 10.sp,
+                color = FactoryTextMuted,
+                fontWeight = FontWeight.Medium
+            )
+            Text(
+                text = value,
+                fontSize = 10.sp,
+                color = FactoryNavy,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+

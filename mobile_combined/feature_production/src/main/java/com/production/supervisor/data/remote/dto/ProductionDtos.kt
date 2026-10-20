@@ -1,0 +1,225 @@
+package com.production.supervisor.data.remote.dto
+
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+
+@Serializable
+data class ProductionBootstrapDto(
+    @SerialName("server_date") val serverDate: String,
+    val timezone: String,
+    val factory: FactoryDto,
+    val factories: List<FactoryDto> = emptyList(),
+    val user: UserDto,
+    val assets: List<ProductionAssetDto>,
+    val products: List<ProductDto>,
+    val operators: List<MachineOperatorDto>,
+    @SerialName("production_options") val productionOptions: List<ProductionOptionDto> = emptyList(),
+    @SerialName("pending_handover") val pendingHandover: ShiftReportDto? = null,
+    @SerialName("today_reports") val todayReports: List<ShiftReportDto> = emptyList()
+)
+
+@Serializable
+data class RefreshTokenRequestDto(
+    val refresh: String
+)
+
+@Serializable
+data class RefreshTokenResponseDto(
+    val access: String,
+    val refresh: String? = null
+)
+
+@Serializable
+data class FactoryDto(
+    val id: Int,
+    val name: String,
+    val code: String
+)
+
+@Serializable
+data class MachineProductionDefaultDto(
+    @SerialName("default_product") val defaultProduct: Int? = null,
+    @SerialName("default_product_name") val defaultProductName: String? = null,
+    @SerialName("default_operator") val defaultOperator: Int? = null,
+    @SerialName("default_operator_name") val defaultOperatorName: String? = null,
+    @SerialName("default_raw_material") val defaultRawMaterial: Int? = null,
+    @SerialName("default_raw_material_name") val defaultRawMaterialName: String? = null,
+    @SerialName("default_final_unit") val defaultFinalUnit: Int? = null,
+    @SerialName("default_final_unit_name") val defaultFinalUnitName: String? = null,
+    @SerialName("target_cycle_unit") val targetCycleUnit: Int? = null,
+    @SerialName("target_cycle_unit_name") val targetCycleUnitName: String? = null,
+    @SerialName("default_packaging") val defaultPackaging: Int? = null,
+    @SerialName("default_packaging_name") val defaultPackagingName: String? = null,
+    @SerialName("original_cavities") val originalCavities: Int = 1,
+    @SerialName("cooling_time_seconds") val coolingTimeSeconds: Double = 0.0,
+    @SerialName("cycle_time_seconds") val cycleTimeSeconds: Double = 0.0,
+    @SerialName("target_cycle_production") val targetCycleProduction: Double = 0.0
+)
+
+@Serializable
+data class ProductionOptionDto(
+    val id: Int,
+    val category: String,
+    val name: String,
+    @SerialName("kg_per_unit") val kgPerUnit: Double? = null
+)
+
+@Serializable
+data class ProductionAssetDto(
+    val id: Int,
+    @SerialName("asset_code") val assetCode: String,
+    @SerialName("name") val name: String = "",
+    @SerialName("display_name") val displayName: String = "",
+    @SerialName("custom_type_name") val customTypeName: String = "",
+    @SerialName("asset_type") val assetType: String,
+    @SerialName("asset_type_display") val assetTypeDisplay: String,
+    @SerialName("sequence_order") val sequenceOrder: Int = 1,
+    @SerialName("is_active") val isActive: Boolean = true,
+    @SerialName("maintenance_title") val maintenanceTitle: String = "",
+    @SerialName("production_title") val productionTitle: String? = null,
+    @SerialName("production_default") val productionDefault: MachineProductionDefaultDto? = null
+)
+
+@Serializable
+data class ProductDto(
+    val id: Int,
+    val name: String,
+    val code: String = "",
+    @SerialName("weight_per_piece_grams") val weightPerPieceGrams: Double = 0.0,
+    @SerialName("is_active") val isActive: Boolean = true
+)
+
+@Serializable
+data class MachineOperatorDto(
+    val id: Int,
+    val name: String,
+    val phone: String = "",
+    @SerialName("is_active") val isActive: Boolean = true
+)
+
+@Serializable
+data class SyncShiftReportInputDto(
+    @SerialName("client_report_id") val clientReportId: String,
+    val shift: String,
+    @SerialName("report_date") val reportDate: String,
+    @SerialName("started_at_device") val startedAtDevice: String? = null,
+    @SerialName("completed_at_device") val completedAtDevice: String? = null,
+    val status: String = "PENDING_HANDOVER",
+    @SerialName("general_notes") val generalNotes: String = "",
+    val entries: List<MachineEntryInputDto> = emptyList(),
+    val stoppages: List<StoppageInputDto> = emptyList(),
+    @SerialName("factory_id") val factoryId: Int? = null
+)
+
+@Serializable
+data class MachineEntryInputDto(
+    @SerialName("dashboard_defaults") val dashboardDefaults: String = "",
+    @SerialName("asset_id") val assetId: Int,
+    @SerialName("operator_id") val operatorId: Int? = null,
+    @SerialName("operator_name") val operatorName: String = "",
+    @SerialName("original_operator_id") val originalOperatorId: Int? = null,
+    @SerialName("original_operator_name") val originalOperatorName: String = "",
+    @SerialName("operator_changed") val operatorChanged: Boolean = false,
+    @SerialName("product_id") val productId: Int? = null,
+    @SerialName("product_name") val productName: String = "",
+    @SerialName("original_product_id") val originalProductId: Int? = null,
+    @SerialName("original_product_name") val originalProductName: String = "",
+    @SerialName("product_changed") val productChanged: Boolean = false,
+    @SerialName("original_cavities") val originalCavities: Int = 1,
+    @SerialName("current_cavities") val currentCavities: Int = 1,
+    @SerialName("operation_mode") val operationMode: String = "AUTO",
+    @SerialName("cooling_time_seconds") val coolingTimeSeconds: Double = 0.0,
+    @SerialName("cycle_time_seconds") val cycleTimeSeconds: Double = 0.0,
+    @SerialName("original_cooling_time_seconds") val originalCoolingTimeSeconds: Double = 0.0,
+    @SerialName("original_cycle_time_seconds") val originalCycleTimeSeconds: Double = 0.0,
+    @SerialName("raw_material") val rawMaterial: String = "",
+    @SerialName("raw_material_option_id") val rawMaterialOptionId: Int? = null,
+    @SerialName("final_production_weight_kg") val finalProductionWeightKg: Double = 0.0,
+    @SerialName("final_production_quantity") val finalProductionQuantity: Double? = null,
+    @SerialName("final_production_unit_id") val finalProductionUnitId: Int? = null,
+    @SerialName("target_cycle_production") val targetCycleProduction: Double = 0.0,
+    @SerialName("packaging_option_id") val packagingOptionId: Int? = null,
+    @SerialName("packaging_type") val packagingType: String = "",
+    val notes: String = ""
+)
+
+@Serializable
+data class StoppageInputDto(
+    @SerialName("asset_id") val assetId: Int? = null,
+    @SerialName("stoppage_type") val stoppageType: String = "MACHINE_BREAKDOWN",
+    val description: String = "",
+    @SerialName("duration_minutes") val durationMinutes: Int = 0,
+    @SerialName("action_taken") val actionTaken: String = ""
+)
+
+@Serializable
+data class ConfirmHandoverInputDto(
+    @SerialName("client_report_id") val clientReportId: String,
+    @SerialName("handover_notes") val handoverNotes: String = "",
+    val decision: String = "ACCEPT"
+)
+
+@Serializable
+data class ShiftReportDto(
+    val id: Int,
+    @SerialName("client_report_id") val clientReportId: String,
+    val shift: String,
+    @SerialName("shift_display") val shiftDisplay: String = "",
+    @SerialName("report_date") val reportDate: String,
+    val status: String,
+    @SerialName("status_display") val statusDisplay: String = "",
+    @SerialName("supervisor_name") val supervisorName: String = "",
+    @SerialName("handover_to_supervisor_name") val handoverToSupervisorName: String? = null,
+    @SerialName("handover_confirmed_at") val handoverConfirmedAt: String? = null,
+    @SerialName("handover_notes") val handoverNotes: String? = null,
+    @SerialName("general_notes") val generalNotes: String = "",
+    @SerialName("started_at_device") val startedAtDevice: String? = null,
+    @SerialName("completed_at_device") val completedAtDevice: String? = null,
+    val supervisor: Int? = null,
+    @SerialName("machine_entries") val machineEntries: List<MachineEntryOutputDto> = emptyList(),
+    val stoppages: List<StoppageOutputDto> = emptyList()
+)
+
+@Serializable
+data class MachineEntryOutputDto(
+    @SerialName("dashboard_defaults") val dashboardDefaults: String = "",
+    val asset: Int,
+    @SerialName("asset_code") val assetCode: String = "",
+    val operator: Int? = null,
+    @SerialName("operator_name") val operatorName: String = "",
+    @SerialName("original_operator") val originalOperator: Int? = null,
+    @SerialName("original_operator_name") val originalOperatorName: String = "",
+    @SerialName("operator_changed") val operatorChanged: Boolean = false,
+    val product: Int? = null,
+    @SerialName("product_name") val productName: String = "",
+    @SerialName("original_product") val originalProduct: Int? = null,
+    @SerialName("original_product_name") val originalProductName: String = "",
+    @SerialName("product_changed") val productChanged: Boolean = false,
+    @SerialName("original_cavities") val originalCavities: Int = 1,
+    @SerialName("current_cavities") val currentCavities: Int = 1,
+    @SerialName("operation_mode") val operationMode: String = "AUTO",
+    @SerialName("cooling_time_seconds") val coolingTimeSeconds: Double = 0.0,
+    @SerialName("cycle_time_seconds") val cycleTimeSeconds: Double = 0.0,
+    @SerialName("original_cooling_time_seconds") val originalCoolingTimeSeconds: Double? = null,
+    @SerialName("original_cycle_time_seconds") val originalCycleTimeSeconds: Double? = null,
+    @SerialName("raw_material") val rawMaterial: String = "",
+    @SerialName("final_production_weight_kg") val finalProductionWeightKg: Double = 0.0,
+    @SerialName("final_production_quantity") val finalProductionQuantity: Double? = null,
+    @SerialName("final_production_unit") val finalProductionUnit: Int? = null,
+    @SerialName("final_production_unit_name") val finalProductionUnitName: String = "كجم",
+    @SerialName("target_cycle_production") val targetCycleProduction: Double = 0.0,
+    @SerialName("target_cycle_unit_name") val targetCycleUnitName: String = "",
+    @SerialName("packaging_type") val packagingType: String = "",
+    val notes: String = ""
+)
+
+@Serializable
+data class StoppageOutputDto(
+    val asset: Int? = null,
+    @SerialName("asset_code") val assetCode: String = "",
+    @SerialName("stoppage_type") val stoppageType: String,
+    @SerialName("stoppage_type_display") val stoppageTypeDisplay: String = "",
+    val description: String = "",
+    @SerialName("duration_minutes") val durationMinutes: Int = 0,
+    @SerialName("action_taken") val actionTaken: String = ""
+)

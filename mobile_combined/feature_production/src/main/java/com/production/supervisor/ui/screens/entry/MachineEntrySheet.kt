@@ -1,0 +1,1271 @@
+package com.production.supervisor.ui.screens.entry
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.DialogProperties
+import com.production.supervisor.data.local.entity.AssetEntity
+import com.production.supervisor.data.local.entity.MachineEntryEntity
+import com.production.supervisor.data.local.entity.OperatorEntity
+import com.production.supervisor.data.local.entity.ProductEntity
+import com.production.supervisor.data.local.entity.ProductionOptionEntity
+import com.production.supervisor.ui.components.ProductionOptionSelector
+import com.production.supervisor.ui.theme.*
+
+private fun normalizeEntryNumber(value: String): String = buildString {
+    value.forEach { char ->
+        when {
+            char in '0'..'9' -> append(char)
+            char in '٠'..'٩' -> append('0' + (char - '٠'))
+            char in '۰'..'۹' -> append('0' + (char - '۰'))
+            char in listOf('.', '٫', ',') -> append('.')
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MachineEntrySheet(
+    asset: AssetEntity,
+    currentReportId: String,
+    existingEntry: MachineEntryEntity?,
+    operators: List<OperatorEntity>,
+    products: List<ProductEntity>,
+    productionOptions: List<ProductionOptionEntity>,
+    onDismiss: () -> Unit,
+    onSave: (MachineEntryEntity) -> Unit,
+    isSaving: Boolean = false
+) {
+    // 1. Initial values for Operator
+    val defaultOp = operators.find { it.id == asset.defaultOperatorId }
+    val initialOperatorName = if (existingEntry != null) existingEntry.operatorName else asset.defaultOperatorName?.takeIf { it.isNotBlank() }
+        ?: defaultOp?.name
+        ?: ""
+
+    var operatorNameText by remember(asset.id, existingEntry?.id) { mutableStateOf(initialOperatorName) }
+    var selectedOperator by remember(asset.id, existingEntry?.id) {
+        mutableStateOf(operators.find { it.name == initialOperatorName } ?: defaultOp.takeIf { existingEntry == null })
+    }
+
+    val originalOperatorDisplayName = asset.defaultOperatorName?.takeIf { it.isNotBlank() }
+        ?: defaultOp?.name
+        ?: existingEntry?.originalOperatorName?.ifBlank { null }
+        ?: ""
+
+    val isOperatorChanged = originalOperatorDisplayName.isNotBlank() &&
+            operatorNameText.trim().isNotBlank() &&
+            operatorNameText.trim() != originalOperatorDisplayName.trim()
+
+    // 2. Initial values for Product
+    val defaultProd = products.find { it.id == asset.defaultProductId }
+    val initialProductName = if (existingEntry != null) existingEntry.productName else asset.defaultProductName?.takeIf { it.isNotBlank() }
+        ?: defaultProd?.name
+        ?: ""
+
+    var productNameText by remember(asset.id, existingEntry?.id) { mutableStateOf(initialProductName) }
+    var selectedProduct by remember(asset.id, existingEntry?.id) {
+        mutableStateOf(products.find { it.name == initialProductName } ?: defaultProd.takeIf { existingEntry == null })
+    }
+
+    val originalProductDisplayName = asset.defaultProductName?.takeIf { it.isNotBlank() }
+        ?: defaultProd?.name
+        ?: existingEntry?.originalProductName?.ifBlank { null }
+        ?: ""
+
+    val isProductChanged = originalProductDisplayName.isNotBlank() &&
+            productNameText.trim().isNotBlank() &&
+            productNameText.trim() != originalProductDisplayName.trim()
+
+    // 3. Technical parameters (Actual vs Default)
+    var currentCavitiesText by remember(asset.id, existingEntry?.id) {
+        mutableStateOf(
+            existingEntry?.currentCavities?.toString()
+                ?: asset.originalCavities.toString()
+        )
+    }
+    var originalCavitiesText by remember(asset.id, existingEntry?.id) {
+        mutableStateOf((existingEntry?.originalCavities ?: asset.originalCavities).toString())
+    }
+    val originalCooling = existingEntry?.originalCoolingTimeSeconds ?: asset.coolingTimeSeconds
+    val originalCycle = existingEntry?.originalCycleTimeSeconds ?: asset.cycleTimeSeconds
+
+    var coolingTimeText by remember(asset.id, existingEntry?.id) {
+        mutableStateOf(
+            (existingEntry?.coolingTimeSeconds ?: asset.coolingTimeSeconds).toString()
+        )
+    }
+
+    var cycleTimeText by remember(asset.id, existingEntry?.id) {
+        mutableStateOf(
+            (existingEntry?.cycleTimeSeconds ?: asset.cycleTimeSeconds).toString()
+        )
+    }
+
+    // 4. Operation Mode & Outputs
+    var operationMode by remember(asset.id, existingEntry?.id) {
+        mutableStateOf(existingEntry?.operationMode ?: "AUTO")
+    }
+    val materialOptions = productionOptions.filter { it.category == "RAW_MATERIAL" }
+    val finalUnits = productionOptions.filter { it.category == "FINAL_UNIT" }
+    val packagingOptions = productionOptions.filter { it.category == "PACKAGING" }
+    var selectedMaterial by remember(asset.id, existingEntry?.id, materialOptions) {
+        mutableStateOf(materialOptions.find { it.id == existingEntry?.rawMaterialOptionId }
+            ?: materialOptions.find { it.name == existingEntry?.rawMaterial }
+            ?: materialOptions.find { it.id == asset.defaultRawMaterialId })
+    }
+    var weightText by remember(asset.id, existingEntry?.id) {
+        val value = existingEntry?.finalProductionQuantity ?: existingEntry?.finalProductionWeightKg ?: 0.0
+        mutableStateOf(if (value > 0) value.toString() else "")
+    }
+    var selectedUnit by remember(asset.id, existingEntry?.id, finalUnits) {
+        mutableStateOf(finalUnits.find { it.id == existingEntry?.finalProductionUnitId }
+            ?: finalUnits.find { it.name == existingEntry?.finalProductionUnitName }
+            ?: finalUnits.find { it.id == asset.defaultFinalUnitId }
+            ?: finalUnits.find { it.name in setOf("كجم", "كيلو", "كيلوجرام") }
+            ?: finalUnits.firstOrNull())
+    }
+    var selectedPackaging by remember(asset.id, existingEntry?.id, packagingOptions) {
+        mutableStateOf(packagingOptions.find { it.id == existingEntry?.packagingOptionId }
+            ?: packagingOptions.find { it.name == existingEntry?.packagingType }
+            ?: packagingOptions.find { it.id == asset.defaultPackagingId })
+    }
+    var notes by remember(asset.id, existingEntry?.id) {
+        mutableStateOf(existingEntry?.notes ?: "")
+    }
+
+    // Picker Dialog States
+    var showOperatorDialog by remember { mutableStateOf(false) }
+    var showProductDialog by remember { mutableStateOf(false) }
+    val validInputs = currentCavitiesText.toIntOrNull()?.let { it > 0 } == true &&
+        originalCavitiesText.toIntOrNull()?.let { it > 0 } == true &&
+        coolingTimeText.toDoubleOrNull()?.let { it.isFinite() && it >= 0 } == true &&
+        cycleTimeText.toDoubleOrNull()?.let { it.isFinite() && it >= 0 } == true &&
+        weightText.toDoubleOrNull()?.let { it.isFinite() && it > 0 } == true
+
+    ModalBottomSheet(
+        onDismissRequest = { if (!isSaving) onDismiss() },
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = FactorySurface,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 32.dp)
+                .verticalScroll(rememberScrollState())
+        ) {
+            // Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Surface(
+                            color = FactoryNavy,
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(
+                                text = asset.assetCode,
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "تسجيل إنتاج الماكينة",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = FactoryNavy
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = asset.productionTitle,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = FactoryTextMuted
+                    )
+                }
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Default.Close, contentDescription = "إغلاق")
+                }
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+
+            // ==========================================
+            // Dashboard Defaults Reference Card (المفروض كذا)
+            // ==========================================
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = FactorySurfaceVariant),
+                shape = RoundedCornerShape(14.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, FactoryCardBorder)
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Outlined.Info,
+                                contentDescription = null,
+                                tint = FactoryNavy,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                            text = "إعدادات الماكينة الافتراضية",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                color = FactoryNavy
+                            )
+                        }
+                        Text(
+                            text = "المعتاد",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = FactoryOrangeDark
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("اللقم الأصلي", fontSize = 10.sp, color = FactoryTextMuted)
+                            Text(
+                                "${asset.originalCavities}",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                color = FactoryDark
+                            )
+                        }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("التبريد", fontSize = 10.sp, color = FactoryTextMuted)
+                            Text(
+                                if (asset.coolingTimeSeconds > 0) "${asset.coolingTimeSeconds} ث" else "غير محدد",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                color = FactoryDark
+                            )
+                        }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("الدورة", fontSize = 10.sp, color = FactoryTextMuted)
+                            Text(
+                                if (asset.cycleTimeSeconds > 0) "${asset.cycleTimeSeconds} ث" else "غير محدد",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                color = FactoryDark
+                            )
+                        }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("المستهدف", fontSize = 10.sp, color = FactoryTextMuted)
+                            Text(
+                                if (asset.targetCycleProduction > 0) "${asset.targetCycleProduction.toInt()} ${asset.targetCycleUnitName.orEmpty()}" else "غير محدد",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                color = FactoryGreenDark
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // ==========================================
+            // 1. القائم على الماكينة (العامل)
+            // ==========================================
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "القائم على الماكينة (العامل):",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp,
+                    color = FactoryDark
+                )
+                if (originalOperatorDisplayName.isNotBlank()) {
+                    Text(
+                        text = "المعتاد: $originalOperatorDisplayName",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = FactoryNavy
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // Professional Operator Selector Card
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showOperatorDialog = true },
+                shape = RoundedCornerShape(12.dp),
+                color = FactorySurface,
+                border = androidx.compose.foundation.BorderStroke(
+                    1.2.dp,
+                    if (isOperatorChanged) FactoryOrange else FactoryCardBorder
+                ),
+                shadowElevation = 0.5.dp
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .background(
+                                    if (isOperatorChanged) FactoryLightOrange else FactoryNavy.copy(alpha = 0.1f),
+                                    CircleShape
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Outlined.Person,
+                                contentDescription = null,
+                                tint = if (isOperatorChanged) FactoryOrangeDark else FactoryNavy,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = operatorNameText.ifBlank { "اضغط لاختيار القائم على الماكينة" },
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                color = if (operatorNameText.isNotBlank()) FactoryDark else FactoryTextMuted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            if (operatorNameText.trim() == originalOperatorDisplayName.trim() && originalOperatorDisplayName.isNotBlank()) {
+                                Text(
+                                    text = "القيمة الافتراضية",
+                                    fontSize = 11.sp,
+                                    color = FactoryGreenDark,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            } else if (selectedOperator?.phone?.isNotBlank() == true) {
+                                Text(
+                                    text = "هاتف: ${selectedOperator?.phone}",
+                                    fontSize = 11.sp,
+                                    color = FactoryTextMuted
+                                )
+                            } else {
+                                Text(
+                                    text = "اضغط لتغيير أو اختيار عامل آخر",
+                                    fontSize = 11.sp,
+                                    color = FactoryTextMuted
+                                )
+                            }
+                        }
+                    }
+                    Icon(
+                        Icons.Default.ArrowDropDown,
+                        contentDescription = "اختيار",
+                        tint = FactoryNavy,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            }
+
+            if (isOperatorChanged) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = FactoryLightOrange),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, FactoryOrange.copy(alpha = 0.5f)),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Outlined.Warning, contentDescription = null, tint = FactoryOrangeDark, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "العامل الحالي: ${operatorNameText.trim()}\nالعامل الافتراضي: $originalOperatorDisplayName",
+                            color = FactoryOrangeDark,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // ==========================================
+            // 2. المنتج المشغل
+            // ==========================================
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "المنتج المشغل:",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp,
+                    color = FactoryDark
+                )
+                if (originalProductDisplayName.isNotBlank()) {
+                    Text(
+                        text = "المعتاد: $originalProductDisplayName",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = FactoryNavy
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // Professional Product Selector Card
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showProductDialog = true },
+                shape = RoundedCornerShape(12.dp),
+                color = FactorySurface,
+                border = androidx.compose.foundation.BorderStroke(
+                    1.2.dp,
+                    if (isProductChanged) FactoryOrange else FactoryCardBorder
+                ),
+                shadowElevation = 0.5.dp
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .background(
+                                    if (isProductChanged) FactoryLightOrange else FactoryNavy.copy(alpha = 0.1f),
+                                    CircleShape
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Outlined.Inventory2,
+                                contentDescription = null,
+                                tint = if (isProductChanged) FactoryOrangeDark else FactoryNavy,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = productNameText.ifBlank { "اضغط لاختيار المنتج المشغل" },
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                color = if (productNameText.isNotBlank()) FactoryDark else FactoryTextMuted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            if (productNameText.trim() == originalProductDisplayName.trim() && originalProductDisplayName.isNotBlank()) {
+                                Text(
+                                    text = "القيمة الافتراضية",
+                                    fontSize = 11.sp,
+                                    color = FactoryGreenDark,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            } else if (selectedProduct != null) {
+                                val details = buildList {
+                                    if (selectedProduct!!.code.isNotBlank()) add("كود: ${selectedProduct!!.code}")
+                                    if (selectedProduct!!.weightPerPieceGrams > 0) add("${selectedProduct!!.weightPerPieceGrams} جم/قطعة")
+                                }.joinToString(" | ")
+                                if (details.isNotBlank()) {
+                                    Text(
+                                        text = details,
+                                        fontSize = 11.sp,
+                                        color = FactoryTextMuted
+                                    )
+                                }
+                            } else {
+                                Text(
+                                    text = "اضغط لتغيير أو اختيار منتج آخر",
+                                    fontSize = 11.sp,
+                                    color = FactoryTextMuted
+                                )
+                            }
+                        }
+                    }
+                    Icon(
+                        Icons.Default.ArrowDropDown,
+                        contentDescription = "اختيار",
+                        tint = FactoryNavy,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            }
+
+            if (isProductChanged) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = FactoryLightOrange),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, FactoryOrange.copy(alpha = 0.5f)),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Outlined.Warning, contentDescription = null, tint = FactoryOrangeDark, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "المنتج الحالي: ${productNameText.trim()}\nالمنتج الافتراضي: $originalProductDisplayName",
+                            color = FactoryOrangeDark,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // ==========================================
+            // 3. المواصفات الفنية الفعلية المنفذة في الوردية
+            // (اللقم الحالي، التبريد الفعلي، الدورة الفعلية، المستهدف الفعلي)
+            // ==========================================
+            Text(
+                text = "المواصفات الفنية المنفذة فعلياً بالوردية:",
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp,
+                color = FactoryDark
+            )
+            Text(
+                text = "يمكنك تعديل أي قيمة وفقاً لما هو قائم بالماكينة الآن (القيم الافتراضية معروضة كمرجع):",
+                fontSize = 11.sp,
+                color = FactoryTextMuted
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // الصف الأول: اللقم الفعلي والتبريد الفعلي
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                OutlinedTextField(
+                    value = currentCavitiesText,
+                    onValueChange = { currentCavitiesText = normalizeEntryNumber(it).filter(Char::isDigit) },
+                    modifier = Modifier.weight(1f),
+                    label = { Text("اللقم الحالية") },
+                    placeholder = { Text("${asset.originalCavities}") },
+                    leadingIcon = { Icon(Icons.Outlined.GridOn, contentDescription = null, tint = FactoryNavy, modifier = Modifier.size(18.dp)) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    shape = RoundedCornerShape(12.dp),
+                    supportingText = { Text("الافتراضي: ${asset.originalCavities}", fontSize = 12.sp) },
+                    isError = currentCavitiesText.toIntOrNull()?.let { it > 0 } != true
+                )
+
+                OutlinedTextField(
+                    value = coolingTimeText,
+                    onValueChange = { coolingTimeText = normalizeEntryNumber(it) },
+                    modifier = Modifier.weight(1f),
+                    label = { Text("التبريد الفعلي (ث)") },
+                    placeholder = { Text("${asset.coolingTimeSeconds}") },
+                    leadingIcon = { Icon(Icons.Outlined.AcUnit, contentDescription = null, tint = FactoryNavy, modifier = Modifier.size(18.dp)) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    shape = RoundedCornerShape(12.dp),
+                    supportingText = { Text("الأصلي: ${originalCooling}ث", fontSize = 12.sp) },
+                    isError = coolingTimeText.toDoubleOrNull()?.let { it.isFinite() && it >= 0 } != true
+                )
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            OutlinedTextField(
+                value = originalCavitiesText,
+                onValueChange = { originalCavitiesText = normalizeEntryNumber(it).filter(Char::isDigit) },
+                modifier = Modifier.fillMaxWidth(), label = { Text("اللقم الأصلية") },
+                supportingText = { Text("القيمة الافتراضية للماكينة: ${asset.originalCavities}") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                shape = RoundedCornerShape(12.dp), singleLine = true,
+                isError = originalCavitiesText.toIntOrNull()?.let { it > 0 } != true
+            )
+
+            // الصف الثاني: الدورة الفعلية والمستهدف الفعلي
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                OutlinedTextField(
+                    value = cycleTimeText,
+                    onValueChange = { cycleTimeText = normalizeEntryNumber(it) },
+                    modifier = Modifier.weight(1f),
+                    label = { Text("الدورة الفعلية (ث)") },
+                    placeholder = { Text("${asset.cycleTimeSeconds}") },
+                    leadingIcon = { Icon(Icons.Outlined.Speed, contentDescription = null, tint = FactoryNavy, modifier = Modifier.size(18.dp)) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    shape = RoundedCornerShape(12.dp),
+                    supportingText = { Text("الأصلي: ${originalCycle}ث", fontSize = 12.sp) },
+                    isError = cycleTimeText.toDoubleOrNull()?.let { it.isFinite() && it >= 0 } != true
+                )
+
+                Surface(modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp), color = FactorySurfaceVariant) {
+                    Column(Modifier.padding(12.dp)) {
+                        Text("مستهدف الدورة (ثابت)", fontSize = 11.sp, color = FactoryTextMuted)
+                        Text("${asset.targetCycleProduction} ${asset.targetCycleUnitName.orEmpty()}", fontWeight = FontWeight.Bold, color = FactoryGreenDark)
+                    }
+                }
+            }
+
+            TextButton(onClick = {
+                currentCavitiesText = asset.originalCavities.toString()
+                originalCavitiesText = asset.originalCavities.toString()
+                coolingTimeText = originalCooling.toString()
+                cycleTimeText = originalCycle.toString()
+            }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                Text("إعادة اللقم والدورة والتبريد إلى القيم الافتراضية", fontSize = 15.sp)
+            }
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // ==========================================
+            // 4. حالة التشغيل (أوتو / يدوي)
+            // ==========================================
+            Text(
+                text = "حالة التشغيل:",
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Button(
+                    onClick = { operationMode = "AUTO" },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(54.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (operationMode == "AUTO") FactoryGreen else FactorySurfaceVariant,
+                        contentColor = if (operationMode == "AUTO") Color.White else FactoryTextSecondary
+                    ),
+                    border = if (operationMode == "AUTO") null else androidx.compose.foundation.BorderStroke(1.dp, FactoryCardBorder),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        if (operationMode == "AUTO") {
+                            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(20.dp), tint = Color.White)
+                            Spacer(modifier = Modifier.width(6.dp))
+                        } else {
+                            Icon(Icons.Outlined.SmartToy, contentDescription = null, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                        }
+                        Column(horizontalAlignment = Alignment.Start) {
+                            Text("أوتو", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                Button(
+                    onClick = { operationMode = "MANUAL" },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(54.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (operationMode == "MANUAL") FactoryOrange else FactorySurfaceVariant,
+                        contentColor = if (operationMode == "MANUAL") Color.White else FactoryTextSecondary
+                    ),
+                    border = if (operationMode == "MANUAL") null else androidx.compose.foundation.BorderStroke(1.dp, FactoryCardBorder),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        if (operationMode == "MANUAL") {
+                            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(20.dp), tint = Color.White)
+                            Spacer(modifier = Modifier.width(6.dp))
+                        } else {
+                            Icon(Icons.Outlined.PanTool, contentDescription = null, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                        }
+                        Column(horizontalAlignment = Alignment.Start) {
+                            Text("يدوي", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // ==========================================
+            // 5. الخامة والوزن والعبوة والملاحظات
+            // ==========================================
+            if (materialOptions.isNotEmpty()) ProductionOptionSelector("الخامة", materialOptions, selectedMaterial, { selectedMaterial = it }, noneLabel = "بدون تحديد")
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            OutlinedTextField(
+                value = weightText,
+                onValueChange = { weightText = normalizeEntryNumber(it) },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("كمية الإنتاج النهائية *") },
+                placeholder = { Text("أدخل الكمية") },
+                leadingIcon = { Icon(Icons.Outlined.Scale, contentDescription = null, tint = FactoryGreenDark) },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                shape = RoundedCornerShape(12.dp),
+                isError = weightText.isNotEmpty() && weightText.toDoubleOrNull()?.let { it.isFinite() && it > 0 } != true
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            if (finalUnits.isNotEmpty()) ProductionOptionSelector("وحدة كمية الإنتاج", finalUnits, selectedUnit, { selectedUnit = it }, allowNone = false)
+
+            if (packagingOptions.isNotEmpty()) ProductionOptionSelector("العبوة", packagingOptions, selectedPackaging, { selectedPackaging = it }, noneLabel = "بدون تحديد")
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            OutlinedTextField(
+                value = notes,
+                onValueChange = { notes = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("ملاحظات الماكينة (اختياري)") },
+                leadingIcon = { Icon(Icons.Outlined.EditNote, contentDescription = null, tint = FactoryNavy) },
+                maxLines = 3,
+                shape = RoundedCornerShape(12.dp)
+            )
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Save Button
+            Button(
+                onClick = {
+                    val currentCavities = currentCavitiesText.toInt()
+                    val actualCooling = coolingTimeText.toDoubleOrNull() ?: asset.coolingTimeSeconds
+                    val actualCycle = cycleTimeText.toDoubleOrNull() ?: asset.cycleTimeSeconds
+                    val weight = weightText.toDoubleOrNull() ?: 0.0
+                    val unit = selectedUnit
+                    val kgFactor = unit?.kgPerUnit
+                    val finalKg = if (kgFactor != null) weight * kgFactor
+                        else if (unit?.name in setOf("كجم", "كيلو", "كيلوجرام")) weight else 0.0
+
+                    val entry = MachineEntryEntity(
+                        id = existingEntry?.id ?: 0,
+                        clientReportId = currentReportId,
+                        assetId = asset.id,
+                        assetCode = asset.assetCode,
+                        operatorId = selectedOperator?.takeIf { it.name == operatorNameText.trim() }?.id,
+                        operatorName = operatorNameText.trim(),
+                        originalOperatorId = asset.defaultOperatorId ?: existingEntry?.originalOperatorId,
+                        originalOperatorName = originalOperatorDisplayName,
+                        operatorChanged = isOperatorChanged,
+                        productId = selectedProduct?.takeIf { it.name == productNameText.trim() }?.id,
+                        productName = productNameText.trim(),
+                        originalProductId = asset.defaultProductId ?: existingEntry?.originalProductId,
+                        originalProductName = originalProductDisplayName,
+                        productChanged = isProductChanged,
+                        originalCavities = originalCavitiesText.toInt(),
+                        currentCavities = currentCavities,
+                        operationMode = operationMode,
+                        coolingTimeSeconds = actualCooling,
+                        cycleTimeSeconds = actualCycle,
+                        originalCoolingTimeSeconds = originalCooling,
+                        originalCycleTimeSeconds = originalCycle,
+                        rawMaterial = selectedMaterial?.name ?: "",
+                        rawMaterialOptionId = selectedMaterial?.id,
+                        finalProductionWeightKg = finalKg,
+                        finalProductionQuantity = weight,
+                        finalProductionUnitId = unit?.id,
+                        finalProductionUnitName = unit?.name ?: "كجم",
+                        targetCycleProduction = asset.targetCycleProduction,
+                        targetCycleUnitName = asset.targetCycleUnitName.orEmpty(),
+                        packagingType = selectedPackaging?.name ?: "",
+                        packagingOptionId = selectedPackaging?.id,
+                        notes = notes
+                    )
+                    onSave(entry)
+                },
+                enabled = validInputs && !isSaving,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = FactoryGreen),
+                elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp)
+            ) {
+                Icon(Icons.Outlined.CheckCircle, contentDescription = null, modifier = Modifier.size(20.dp), tint = Color.White)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(if (isSaving) "جاري الحفظ" else "حفظ بيانات الماكينة", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+            }
+        }
+    }
+
+    // ==========================================
+    // Professional Operator Picker Dialog
+    // ==========================================
+    if (showOperatorDialog) {
+        OperatorPickerDialog(
+            operators = operators,
+            currentSelectedName = operatorNameText,
+            defaultOperatorName = originalOperatorDisplayName,
+            onDismiss = { showOperatorDialog = false },
+            onSelect = { name, op ->
+                operatorNameText = name
+                selectedOperator = op
+                showOperatorDialog = false
+            }
+        )
+    }
+
+    // ==========================================
+    // Professional Product Picker Dialog
+    // ==========================================
+    if (showProductDialog) {
+        ProductPickerDialog(
+            products = products,
+            currentSelectedName = productNameText,
+            defaultProductName = originalProductDisplayName,
+            onDismiss = { showProductDialog = false },
+            onSelect = { name, prod ->
+                productNameText = name
+                selectedProduct = prod
+                showProductDialog = false
+            }
+        )
+    }
+}
+
+// ==========================================
+// Dialog: اختيار القائم على الماكينة
+// ==========================================
+@Composable
+private fun OperatorPickerDialog(
+    operators: List<OperatorEntity>,
+    currentSelectedName: String,
+    defaultOperatorName: String,
+    onDismiss: () -> Unit,
+    onSelect: (String, OperatorEntity?) -> Unit
+) {
+    var searchQuery by remember { mutableStateOf("") }
+
+    val filtered = remember(searchQuery, operators) {
+        if (searchQuery.isBlank()) operators
+        else operators.filter {
+            it.name.contains(searchQuery, ignoreCase = true) || it.phone.contains(searchQuery)
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+        modifier = Modifier
+            .fillMaxWidth(0.94f)
+            .padding(vertical = 24.dp),
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.Person, contentDescription = null, tint = FactoryNavy)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        "اختيار القائم على الماكينة",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 17.sp,
+                        color = FactoryNavy
+                    )
+                }
+                IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+                    Icon(Icons.Default.Close, contentDescription = "إغلاق")
+                }
+            }
+        },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                // Search field
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("بحث عن عامل بالاسم أو الهاتف...") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = FactoryTextMuted) },
+                    trailingIcon = {
+                        if (searchQuery.isNotBlank()) {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(Icons.Default.Close, contentDescription = "مسح", modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    },
+                    shape = RoundedCornerShape(10.dp),
+                    singleLine = true
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 340.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    item {
+                        Surface(modifier = Modifier.fillMaxWidth().clickable { onSelect("", null) }, shape = RoundedCornerShape(10.dp), color = FactorySurfaceVariant) {
+                            Text("بدون تحديد (اختياري)", Modifier.padding(13.dp), color = FactoryTextSecondary, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                    // Option: Default Dashboard Operator
+                    if (defaultOperatorName.isNotBlank() && searchQuery.isBlank()) {
+                        item {
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        val matched = operators.find { it.name == defaultOperatorName }
+                                        onSelect(defaultOperatorName, matched)
+                                    },
+                                shape = RoundedCornerShape(12.dp),
+                                color = FactoryLightOrange,
+                                border = androidx.compose.foundation.BorderStroke(1.2.dp, FactoryOrange)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Filled.Star, contentDescription = null, tint = FactoryOrangeDark, modifier = Modifier.size(20.dp))
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Column {
+                                            Text(defaultOperatorName, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = FactoryNavy)
+                                            Text("العامل الافتراضي", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = FactoryTextSecondary)
+                                        }
+                                    }
+                                    if (currentSelectedName.trim() == defaultOperatorName.trim()) {
+                                        Icon(Icons.Default.Check, contentDescription = null, tint = FactoryOrangeDark)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Operators list
+                    items(filtered) { op ->
+                        val isSelected = currentSelectedName.trim() == op.name.trim()
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onSelect(op.name, op) },
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (isSelected) FactoryNavy.copy(alpha = 0.08f) else FactorySurface,
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                if (isSelected) FactoryNavy else FactoryCardBorder
+                            )
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        Icons.Outlined.Person,
+                                        contentDescription = null,
+                                        tint = if (isSelected) FactoryNavy else FactoryTextMuted,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column {
+                                        Text(
+                                            op.name,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                            fontSize = 13.sp,
+                                            color = if (isSelected) FactoryNavy else FactoryDark
+                                        )
+                                        if (op.phone.isNotBlank()) {
+                                            Text(op.phone, fontSize = 11.sp, color = FactoryTextMuted)
+                                        }
+                                    }
+                                }
+                                if (isSelected) {
+                                    Icon(Icons.Default.Check, contentDescription = null, tint = FactoryNavy)
+                                }
+                            }
+                        }
+                    }
+
+                    if (filtered.isEmpty()) {
+                        item {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 20.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("لا يوجد عمال مطابقين للبحث", fontSize = 12.sp, color = FactoryTextMuted)
+                            }
+                        }
+                    }
+                }
+
+            }
+        },
+        confirmButton = {}
+    )
+}
+
+// ==========================================
+// Dialog: اختيار المنتج المشغل
+// ==========================================
+@Composable
+private fun ProductPickerDialog(
+    products: List<ProductEntity>,
+    currentSelectedName: String,
+    defaultProductName: String,
+    onDismiss: () -> Unit,
+    onSelect: (String, ProductEntity?) -> Unit
+) {
+    var searchQuery by remember { mutableStateOf("") }
+
+    val filtered = remember(searchQuery, products) {
+        if (searchQuery.isBlank()) products
+        else products.filter {
+            it.name.contains(searchQuery, ignoreCase = true) || it.code.contains(searchQuery, ignoreCase = true)
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+        modifier = Modifier
+            .fillMaxWidth(0.94f)
+            .padding(vertical = 24.dp),
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.Inventory2, contentDescription = null, tint = FactoryNavy)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        "اختيار المنتج المشغل",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 17.sp,
+                        color = FactoryNavy
+                    )
+                }
+                IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+                    Icon(Icons.Default.Close, contentDescription = "إغلاق")
+                }
+            }
+        },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                // Search field
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("بحث باسم المنتج أو الكود...") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = FactoryTextMuted) },
+                    trailingIcon = {
+                        if (searchQuery.isNotBlank()) {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(Icons.Default.Close, contentDescription = "مسح", modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    },
+                    shape = RoundedCornerShape(10.dp),
+                    singleLine = true
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 340.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    item {
+                        Surface(modifier = Modifier.fillMaxWidth().clickable { onSelect("", null) }, shape = RoundedCornerShape(10.dp), color = FactorySurfaceVariant) {
+                            Text("بدون تحديد (اختياري)", Modifier.padding(13.dp), color = FactoryTextSecondary, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                    // Option: Default Dashboard Product
+                    if (defaultProductName.isNotBlank() && searchQuery.isBlank()) {
+                        item {
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        val matched = products.find { it.name == defaultProductName }
+                                        onSelect(defaultProductName, matched)
+                                    },
+                                shape = RoundedCornerShape(12.dp),
+                                color = FactoryLightOrange,
+                                border = androidx.compose.foundation.BorderStroke(1.2.dp, FactoryOrange)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Filled.Star, contentDescription = null, tint = FactoryOrangeDark, modifier = Modifier.size(20.dp))
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Column {
+                                            Text(defaultProductName, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = FactoryNavy)
+                                            Text("المنتج الافتراضي", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = FactoryTextSecondary)
+                                        }
+                                    }
+                                    if (currentSelectedName.trim() == defaultProductName.trim()) {
+                                        Icon(Icons.Default.Check, contentDescription = null, tint = FactoryOrangeDark)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Products list
+                    items(filtered) { prod ->
+                        val isSelected = currentSelectedName.trim() == prod.name.trim()
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onSelect(prod.name, prod) },
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (isSelected) FactoryNavy.copy(alpha = 0.08f) else FactorySurface,
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                if (isSelected) FactoryNavy else FactoryCardBorder
+                            )
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        Icons.Outlined.Inventory2,
+                                        contentDescription = null,
+                                        tint = if (isSelected) FactoryNavy else FactoryTextMuted,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column {
+                                        Text(
+                                            prod.name,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                            fontSize = 13.sp,
+                                            color = if (isSelected) FactoryNavy else FactoryDark
+                                        )
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            if (prod.code.isNotBlank()) {
+                                                Surface(
+                                                    color = Color(0xFFF1F5F9),
+                                                    shape = RoundedCornerShape(4.dp)
+                                                ) {
+                                                    Text(
+                                                        "كود: ${prod.code}",
+                                                        fontSize = 10.sp,
+                                                        color = FactoryNavy,
+                                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                    )
+                                                }
+                                            }
+                                            if (prod.weightPerPieceGrams > 0) {
+                                                Text(
+                                                    "الوزن: ${prod.weightPerPieceGrams} جم/قطعة",
+                                                    fontSize = 11.sp,
+                                                    color = FactoryTextMuted
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                                if (isSelected) {
+                                    Icon(Icons.Default.Check, contentDescription = null, tint = FactoryNavy)
+                                }
+                            }
+                        }
+                    }
+
+                    if (filtered.isEmpty()) {
+                        item {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 20.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("لا توجد منتجات مسجلة مطابقة للبحث", fontSize = 12.sp, color = FactoryTextMuted)
+                            }
+                        }
+                    }
+                }
+
+            }
+        },
+        confirmButton = {}
+    )
+}
