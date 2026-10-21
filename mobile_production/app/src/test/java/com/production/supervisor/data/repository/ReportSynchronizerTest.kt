@@ -24,7 +24,7 @@ import retrofit2.Response
 class ReportSynchronizerTest {
     private class LocalReport {
         var snapshot = ReportSnapshot(
-            ShiftReportEntity("stable-uuid", "SECOND", "2026-10-11", "2026-10-11T16:00:00", factoryId = 7, localRevision = 1),
+            ShiftReportEntity("stable-uuid", "SECOND", "2026-10-11", "2026-10-11T16:00:00", factoryId = 7, localRevision = 1, ownerUserId = 12),
             listOf(MachineEntryEntity(clientReportId = "stable-uuid", assetId = 4, assetCode = "4", finalProductionWeightKg = 10.0)),
             emptyList()
         )
@@ -109,6 +109,7 @@ class ReportSynchronizerTest {
         assertEquals(1, local.rejectedAcknowledgements)
         assertTrue(local.snapshot.report.isSynced)
         assertTrue(api.uploads.all { it.clientReportId == "stable-uuid" && it.factoryId == 7 })
+        assertTrue(api.uploads.all { it.supervisorId == 12 })
     }
 
     @Test fun simultaneousRequestsCoalesceAndNeverUploadConcurrently() = runTest {

@@ -2,6 +2,7 @@ package com.production.supervisor.data.local.datastore
 
 import android.content.Context
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -23,6 +24,7 @@ class TokenManager @Inject constructor(
         val USER_PHONE_KEY = stringPreferencesKey("user_phone")
         val USER_NAME_KEY = stringPreferencesKey("user_name")
         val USER_ROLE_KEY = stringPreferencesKey("user_role")
+        val USER_ID_KEY = intPreferencesKey("user_id")
         val SELECTED_FACTORY_ID_KEY = stringPreferencesKey("selected_factory_id")
         val SELECTED_FACTORY_NAME_KEY = stringPreferencesKey("selected_factory_name")
         val ASSIGNED_SHIFT_KEY = stringPreferencesKey("assigned_shift")
@@ -38,6 +40,11 @@ class TokenManager @Inject constructor(
     suspend fun getSelectedFactoryId(): String? = context.dataStore.data.first()[SELECTED_FACTORY_ID_KEY]
     suspend fun getSelectedFactoryName(): String? = context.dataStore.data.first()[SELECTED_FACTORY_NAME_KEY]
     suspend fun getAssignedShift(): String? = context.dataStore.data.first()[ASSIGNED_SHIFT_KEY]
+    suspend fun getUserId(): Int? = context.dataStore.data.first()[USER_ID_KEY]
+
+    suspend fun saveUserId(userId: Int) {
+        context.dataStore.edit { it[USER_ID_KEY] = userId }
+    }
 
     suspend fun saveAssignedShift(shift: String?) {
         context.dataStore.edit { prefs ->
@@ -45,13 +52,14 @@ class TokenManager @Inject constructor(
         }
     }
 
-    suspend fun saveTokens(access: String, refresh: String, phone: String, name: String, role: String) {
+    suspend fun saveTokens(access: String, refresh: String, phone: String, name: String, role: String, userId: Int?) {
         context.dataStore.edit { prefs ->
             prefs[ACCESS_TOKEN_KEY] = access
             prefs[REFRESH_TOKEN_KEY] = refresh
             prefs[USER_PHONE_KEY] = phone
             prefs[USER_NAME_KEY] = name
             prefs[USER_ROLE_KEY] = role
+            if (userId != null) prefs[USER_ID_KEY] = userId else prefs.remove(USER_ID_KEY)
         }
     }
 

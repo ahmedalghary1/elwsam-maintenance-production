@@ -27,7 +27,8 @@ class AuthRepository @Inject constructor(
                     refresh = body.refresh,
                     phone = body.user?.phone ?: phone,
                     name = body.user?.name ?: phone,
-                    role = body.user?.role ?: ""
+                    role = body.user?.role ?: "",
+                    userId = body.user?.id
                 )
                 Result.success(Unit)
             } else {

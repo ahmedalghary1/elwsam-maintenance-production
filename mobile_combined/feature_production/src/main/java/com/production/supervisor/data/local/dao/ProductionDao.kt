@@ -64,14 +64,11 @@ interface ProductionDao {
     @Query("SELECT * FROM shift_reports WHERE clientReportId = :reportId LIMIT 1")
     suspend fun getShiftReport(reportId: String): ShiftReportEntity?
 
-    @Query("SELECT * FROM shift_reports WHERE reportDate = :date AND shift = :shift AND factoryId = :factoryId ORDER BY startedAtDevice DESC LIMIT 1")
-    suspend fun findShiftReport(date: String, shift: String, factoryId: Int): ShiftReportEntity?
+    @Query("SELECT * FROM shift_reports WHERE reportDate = :date AND shift = :shift AND factoryId = :factoryId AND ownerUserId = :ownerUserId ORDER BY startedAtDevice DESC LIMIT 1")
+    suspend fun findShiftReport(date: String, shift: String, factoryId: Int, ownerUserId: Int): ShiftReportEntity?
 
-    @Query("UPDATE shift_reports SET factoryId = :factoryId WHERE factoryId IS NULL")
-    suspend fun assignLegacyReportFactory(factoryId: Int)
-
-    @Query("SELECT * FROM shift_reports WHERE isSynced = 0")
-    suspend fun getUnsyncedReports(): List<ShiftReportEntity>
+    @Query("SELECT * FROM shift_reports WHERE isSynced = 0 AND ownerUserId = :ownerUserId")
+    suspend fun getUnsyncedReports(ownerUserId: Int): List<ShiftReportEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertShiftReport(report: ShiftReportEntity)
@@ -102,7 +99,12 @@ interface ProductionDao {
 
     @Transaction
     suspend fun getOrInsertShiftReport(report: ShiftReportEntity): ShiftReportEntity {
-        return findShiftReport(report.reportDate, report.shift, requireNotNull(report.factoryId))
+        return findShiftReport(
+            report.reportDate,
+            report.shift,
+            requireNotNull(report.factoryId),
+            requireNotNull(report.ownerUserId)
+        )
             ?: report.also { upsertShiftReport(it) }
     }
 
@@ -175,7 +177,12 @@ interface ProductionDao {
     @Transaction
     suspend fun restoreServerReports(reports: List<ReportSnapshot>) {
         reports.forEach { remote ->
-            val local = findShiftReport(remote.report.reportDate, remote.report.shift, requireNotNull(remote.report.factoryId))
+            val local = findShiftReport(
+                remote.report.reportDate,
+                remote.report.shift,
+                requireNotNull(remote.report.factoryId),
+                requireNotNull(remote.report.ownerUserId)
+            )
             val sameIdLocal = getShiftReport(remote.report.clientReportId)
             if (local?.isSynced == false || sameIdLocal?.isSynced == false) return@forEach
             if (local != null && local.clientReportId != remote.report.clientReportId) {

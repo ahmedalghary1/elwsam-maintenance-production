@@ -123,11 +123,13 @@ class ProductionRepository @Inject constructor(
                 dao.replaceBootstrapCache(assetEntities, productEntities, operatorEntities, optionEntities)
                 tokenManager.saveSelectedFactory(data.factory.id.toString(), data.factory.name)
                 tokenManager.saveAssignedShift(data.user.shift)
+                tokenManager.saveUserId(data.user.id)
                 dao.restoreServerReports(data.todayReports.filter {
                     it.completedAtDevice != null || it.status == "CONFIRMED" || it.supervisor == data.user.id
                 }.map {
                     val report = ShiftReportEntity(
                         clientReportId = it.clientReportId,
+                        ownerUserId = data.user.id,
                         factoryId = data.factory.id,
                         shift = it.shift,
                         reportDate = it.reportDate,
@@ -213,9 +215,11 @@ class ProductionRepository @Inject constructor(
     suspend fun getOrCreateShiftReport(date: String, shift: String): ShiftReportEntity {
         val factoryId = getCachedFactoryId()
             ?: throw IllegalStateException("اختر المصنع وحمّل بياناته قبل تسجيل التقرير.")
-        dao.assignLegacyReportFactory(factoryId)
+        val ownerUserId = tokenManager.getUserId()
+            ?: throw IllegalStateException("تعذر تحديد صاحب التقرير. سجّل الخروج ثم ادخل إلى حسابك مرة أخرى.")
         val newReport = ShiftReportEntity(
             clientReportId = UUID.randomUUID().toString(),
+            ownerUserId = ownerUserId,
             shift = shift,
             reportDate = date,
             factoryId = factoryId,
@@ -275,14 +279,21 @@ class ProductionRepository @Inject constructor(
     fun requestSync(clientReportId: String) = syncScheduler.requestSync(clientReportId)
 
     private suspend fun requestPendingSync() {
-        dao.getUnsyncedReports().filter { it.factoryId != null }.forEach { requestSync(it.clientReportId) }
+        val ownerUserId = tokenManager.getUserId() ?: return
+        dao.getUnsyncedReports(ownerUserId).filter { it.factoryId != null }.forEach { requestSync(it.clientReportId) }
     }
 
-    suspend fun syncReportNow(clientReportId: String): Result<Unit> = synchronizer.syncReportNow(clientReportId)
+    suspend fun syncReportNow(clientReportId: String): Result<Unit> {
+        val report = dao.getShiftReport(clientReportId) ?: return Result.success(Unit)
+        val currentUserId = tokenManager.getUserId()
+        if (report.ownerUserId == null || report.ownerUserId != currentUserId) return Result.success(Unit)
+        return synchronizer.syncReportNow(clientReportId)
+    }
 
     suspend fun syncPendingReports(): Result<Unit> {
         var firstFailure: Throwable? = null
-        dao.getUnsyncedReports().forEach {
+        val ownerUserId = tokenManager.getUserId() ?: return Result.success(Unit)
+        dao.getUnsyncedReports(ownerUserId).forEach {
             val result = syncReportNow(it.clientReportId)
             if (result.isFailure && firstFailure == null) firstFailure = result.exceptionOrNull()
         }

@@ -67,6 +67,7 @@ class ReportSynchronizer @Inject constructor(
 
 internal fun ReportSnapshot.toInput() = SyncShiftReportInputDto(
     clientReportId = report.clientReportId,
+    supervisorId = report.ownerUserId,
     factoryId = report.factoryId,
     shift = report.shift,
     reportDate = report.reportDate,

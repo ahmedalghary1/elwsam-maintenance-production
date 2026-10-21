@@ -17,13 +17,20 @@ import com.production.supervisor.data.local.entity.*
         MachineEntryEntity::class,
         StoppageEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = false
 )
 abstract class ProductionDatabase : RoomDatabase() {
     abstract fun productionDao(): ProductionDao
 
     companion object {
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE shift_reports ADD COLUMN ownerUserId INTEGER")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_shift_reports_ownerUserId_factoryId_reportDate_shift ON shift_reports(ownerUserId, factoryId, reportDate, shift)")
+            }
+        }
+
         val MIGRATION_5_6 = object : Migration(5, 6) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE machine_entries ADD COLUMN dashboardDefaults TEXT NOT NULL DEFAULT ''")

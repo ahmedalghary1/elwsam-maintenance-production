@@ -8,7 +8,11 @@ import androidx.room.ColumnInfo
 
 @Entity(
     tableName = "shift_reports",
-    indices = [Index(value = ["reportDate", "shift"]), Index(value = ["factoryId", "reportDate", "shift"])]
+    indices = [
+        Index(value = ["reportDate", "shift"]),
+        Index(value = ["factoryId", "reportDate", "shift"]),
+        Index(value = ["ownerUserId", "factoryId", "reportDate", "shift"])
+    ]
 )
 data class ShiftReportEntity(
     @PrimaryKey val clientReportId: String,
@@ -23,7 +27,8 @@ data class ShiftReportEntity(
     val handoverToSupervisorName: String? = null,
     val handoverNotes: String? = null,
     val factoryId: Int? = null,
-    @ColumnInfo(defaultValue = "0") val localRevision: Long = 0
+    @ColumnInfo(defaultValue = "0") val localRevision: Long = 0,
+    val ownerUserId: Int? = null
 )
 
 @Entity(

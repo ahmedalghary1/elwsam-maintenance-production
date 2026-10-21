@@ -100,6 +100,7 @@ data class MachineOperatorDto(
 @Serializable
 data class SyncShiftReportInputDto(
     @SerialName("client_report_id") val clientReportId: String,
+    @SerialName("supervisor_id") val supervisorId: Int? = null,
     val shift: String,
     @SerialName("report_date") val reportDate: String,
     @SerialName("started_at_device") val startedAtDevice: String? = null,
