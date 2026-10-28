@@ -10,6 +10,14 @@ data class ReportSnapshot(
     val stoppages: List<StoppageEntity>
 )
 
+data class AssetLabel(
+    val id: Int,
+    val code: String,
+    val type: String,
+    val typeDisplay: String,
+    val title: String
+)
+
 @Dao
 interface ProductionDao {
 
@@ -24,6 +32,16 @@ interface ProductionDao {
 
     @Query("DELETE FROM assets")
     suspend fun deleteAllAssets()
+
+    @Query("UPDATE assets SET assetCode = :code, assetType = :type, assetTypeDisplay = :typeDisplay, maintenanceTitle = :title WHERE id = :id")
+    suspend fun updateAssetLabel(id: Int, code: String, type: String, typeDisplay: String, title: String)
+
+    @Transaction
+    suspend fun refreshAssetLabels(labels: List<AssetLabel>) {
+        labels.forEach { label ->
+            updateAssetLabel(label.id, label.code, label.type, label.typeDisplay, label.title)
+        }
+    }
 
     @Query("SELECT * FROM products WHERE isActive = 1 ORDER BY name ASC")
     fun getProductsFlow(): Flow<List<ProductEntity>>

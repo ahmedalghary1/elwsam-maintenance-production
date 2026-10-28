@@ -2,6 +2,7 @@ package com.production.supervisor.data.repository
 
 import com.production.supervisor.data.local.dao.ProductionDao
 import com.production.supervisor.data.local.dao.ReportSnapshot
+import com.production.supervisor.data.local.dao.AssetLabel
 import com.production.supervisor.data.local.entity.*
 import com.production.supervisor.data.remote.api.ProductionApiService
 import com.production.supervisor.data.remote.dto.*
@@ -50,6 +51,10 @@ class ProductionRepository @Inject constructor(
             ?: throw IllegalStateException("تعذر تحديث اختيارات الإنتاج (${response.code()})")
         check(data.factory.id == factoryId) { "تغيّر المصنع أثناء تحديث اختيارات الإنتاج" }
         check(getCachedFactoryId() == factoryId) { "تغيّر المصنع أثناء تحديث اختيارات الإنتاج" }
+        dao.refreshAssetLabels(data.assets.map { asset ->
+            AssetLabel(asset.id, asset.assetCode, asset.assetType, asset.assetTypeDisplay,
+                asset.productionTitle ?: asset.maintenanceTitle)
+        })
         dao.replaceProductionOptions(data.productionOptions.map { option ->
             ProductionOptionEntity(option.id, option.category, option.name, option.kgPerUnit)
         })

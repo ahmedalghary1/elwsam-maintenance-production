@@ -28,29 +28,17 @@ data class Asset(val id: Int, val code: String, val name: String, val typeName: 
 }
 
 fun normalizeAssetTypeName(raw: String): String {
-    val trimmed = raw.trim()
-    return when {
-        trimmed.contains("حقن") -> "ماكينة حقن"
-        trimmed.contains("عادية") || trimmed.contains("عاديه") -> "ماكينة حقن"
-        trimmed.contains("نفخ") -> "ماكينة نفخ"
-        trimmed.contains("سوست") -> "ماكينة نفخ"
-        trimmed.contains("مكبس") -> "مكبس"
-        trimmed.isNotBlank() -> trimmed
-        else -> "ماكينة"
-    }
+    return raw.trim().ifBlank { "ماكينة" }
 }
 
 fun formatMaintenanceTitle(normalizedType: String, code: String): String {
-    val cleanCode = code.trim()
-    if (cleanCode.startsWith("الصيانة الدورية")) return cleanCode
-    if (cleanCode.startsWith("مكبس") || cleanCode.startsWith("ماكينة") || cleanCode.startsWith("خط")) {
-        return "الصيانة الدورية ل$cleanCode"
-    }
-    return when {
-        normalizedType.contains("مكبس") -> "الصيانة الدورية لمكبس $cleanCode"
-        normalizedType.startsWith("ماكينة") -> "الصيانة الدورية ل$normalizedType $cleanCode"
-        else -> "الصيانة الدورية لماكينة $normalizedType $cleanCode"
-    }
+    val displayName = code.trim()
+    if (displayName.startsWith("الصيانة الدورية")) return displayName
+    val fullName = if (displayName.isBlank()) normalizedType
+        else if (displayName.startsWith(normalizedType) || displayName.startsWith("مكبس") ||
+            displayName.startsWith("ماكينة") || displayName.startsWith("خط")) displayName
+        else "$normalizedType $displayName"
+    return "الصيانة الدورية لـ $fullName"
 }
 
 data class ChecklistItem(val id: Int, val sectionId: Int, val text: String, val sequence: Int)

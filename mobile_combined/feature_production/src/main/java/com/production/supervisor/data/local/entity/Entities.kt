@@ -42,8 +42,6 @@ data class AssetEntity(
             }
             val typeLabel = if (assetTypeDisplay.isNotBlank()) {
                 assetTypeDisplay
-            } else if (assetType.contains("BLOW", ignoreCase = true) || assetType.contains("SPRING", ignoreCase = true)) {
-                "ماكينة نفخ"
             } else if (assetType.contains("PRESS", ignoreCase = true)) {
                 "مكبس"
             } else {
