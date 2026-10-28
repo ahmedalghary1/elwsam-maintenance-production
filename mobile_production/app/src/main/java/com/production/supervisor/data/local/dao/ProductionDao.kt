@@ -64,6 +64,9 @@ interface ProductionDao {
     @Query("SELECT * FROM shift_reports WHERE clientReportId = :reportId LIMIT 1")
     suspend fun getShiftReport(reportId: String): ShiftReportEntity?
 
+    @Query("UPDATE shift_reports SET factoryId = :factoryId WHERE factoryId IS NULL")
+    suspend fun assignLegacyReportFactory(factoryId: Int)
+
     @Query("SELECT * FROM shift_reports WHERE reportDate = :date AND shift = :shift AND factoryId = :factoryId AND ownerUserId = :ownerUserId ORDER BY startedAtDevice DESC LIMIT 1")
     suspend fun findShiftReport(date: String, shift: String, factoryId: Int, ownerUserId: Int): ShiftReportEntity?
 

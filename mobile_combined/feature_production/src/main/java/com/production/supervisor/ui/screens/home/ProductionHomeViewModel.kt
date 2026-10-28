@@ -47,6 +47,7 @@ data class ProductionHomeUiState(
     val isFinishingShift: Boolean = false,
     val isReportFinished: Boolean = false,
     val isReportSynced: Boolean = false,
+    val showReportSentConfirmation: Boolean = false,
     val reportStatus: String = "DRAFT",
     val message: String? = null,
     val selectedAssetForEntry: AssetEntity? = null,
@@ -69,6 +70,9 @@ class ProductionHomeViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(ProductionHomeUiState())
     val uiState: StateFlow<ProductionHomeUiState> = _uiState.asStateFlow()
+    private var observedReportId: String? = null
+    private var observedReportSynced: Boolean? = null
+    private var pendingConfirmationReportId: String? = null
 
     private fun getStoppedPrefs() = context.getSharedPreferences("stopped_machines_prefs", Context.MODE_PRIVATE)
 
@@ -139,11 +143,22 @@ class ProductionHomeViewModel @Inject constructor(
                     if (reportId.isBlank()) flowOf(null) else repository.getShiftReportFlow(reportId)
                 }
                 .collect { report ->
+                    val reportId = report?.clientReportId
+                    val wasSynced = if (observedReportId == reportId) observedReportSynced else null
+                    val isSynced = report?.isSynced == true
+                    val isFinished = report?.completedAtDevice != null || report?.status == "CONFIRMED"
+                    val sentNow = reportId != null && isFinished && isSynced &&
+                        (wasSynced == false || pendingConfirmationReportId == reportId)
+                    observedReportId = reportId
+                    observedReportSynced = isSynced
+                    if (sentNow) pendingConfirmationReportId = null
                     _uiState.update {
                         it.copy(
                             reportStatus = report?.status ?: "DRAFT",
-                            isReportFinished = report?.completedAtDevice != null || report?.status == "CONFIRMED",
-                            isReportSynced = report?.isSynced == true
+                            isReportFinished = isFinished,
+                            isReportSynced = isSynced,
+                            message = if (sentNow) null else it.message,
+                            showReportSentConfirmation = if (sentNow) true else if (it.currentReportId != reportId) false else it.showReportSentConfirmation
                         )
                     }
                 }
@@ -452,12 +467,20 @@ class ProductionHomeViewModel @Inject constructor(
         if (entries.any { it.clientReportId != state.currentReportId ||
                 !validMachineValues(it.finalProductionQuantity, it.currentCavities, it.originalCavities, it.coolingTimeSeconds, it.cycleTimeSeconds) }) return
         _uiState.update { it.copy(isFinishingShift = true) }
+        pendingConfirmationReportId = state.currentReportId
         viewModelScope.launch {
             try {
                 repository.finishShift(state.currentReportId, notes, entries)
                     .onSuccess {
-                        _uiState.update { it.copy(isReportFinished = true, message = "تم حفظ التقرير. يظهر تأكيد الإرسال عند وصوله إلى الموقع.") }
+                        _uiState.update {
+                            it.copy(
+                                isReportFinished = true,
+                                message = if (it.showReportSentConfirmation || it.isReportSynced) null
+                                    else "تم حفظ التقرير. يظهر تأكيد الإرسال عند وصوله إلى الموقع."
+                            )
+                        }
                     }.onFailure { ex ->
+                        pendingConfirmationReportId = null
                         _uiState.update { it.copy(message = ex.message ?: "تعذر حفظ التقرير. أعد المحاولة.") }
                     }
             } finally {
@@ -470,6 +493,10 @@ class ProductionHomeViewModel @Inject constructor(
         val reportId = _uiState.value.currentReportId.takeIf { it.isNotBlank() } ?: return
         repository.requestSync(reportId)
         _uiState.update { it.copy(message = "سيتم إرسال التقرير عند توفر الاتصال") }
+    }
+
+    fun dismissReportSentConfirmation() {
+        _uiState.update { it.copy(showReportSentConfirmation = false) }
     }
 
     private fun canEditReport(): Boolean {

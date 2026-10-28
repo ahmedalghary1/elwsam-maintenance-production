@@ -48,6 +48,10 @@ fun ProductionHomeScreen(
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
+    if (uiState.showReportSentConfirmation) {
+        ReportSentConfirmationScreen(onContinue = viewModel::dismissReportSentConfirmation)
+        return
+    }
     if (!uiState.handoverChecked || uiState.pendingHandover != null) {
         com.production.supervisor.ui.screens.handover.HandoverGate(uiState, viewModel)
         return
