@@ -217,6 +217,15 @@ class ProductionHomeViewModel @Inject constructor(
         loadData(factory.id.toString())
     }
 
+    fun refreshProductionOptions() {
+        val state = _uiState.value
+        val factoryId = state.selectedFactoryId ?: return
+        if (state.isLoading || !state.handoverChecked) return
+        viewModelScope.launch {
+            repository.refreshProductionOptions(factoryId)
+        }
+    }
+
     fun checkIncomingHandover() {
         if (!_uiState.value.handoverChecked || _uiState.value.isLoading) return
         viewModelScope.launch {

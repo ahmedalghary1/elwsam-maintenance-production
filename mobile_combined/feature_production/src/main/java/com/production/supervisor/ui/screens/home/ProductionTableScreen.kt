@@ -17,6 +17,9 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.mapSaver
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
@@ -37,6 +40,7 @@ import com.production.supervisor.ui.screens.handover.HandoverDialog
 import com.production.supervisor.ui.screens.stoppage.StoppageDialog
 import com.production.supervisor.ui.screens.stoppage.MachineStopReasonDialog
 import org.json.JSONObject
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -60,6 +64,15 @@ fun ProductionTableScreen(viewModel: ProductionHomeViewModel, onLogout: () -> Un
 @Composable
 private fun ProductionTableContent(viewModel: ProductionHomeViewModel, onLogout: () -> Unit) {
     val state by viewModel.uiState.collectAsState()
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(lifecycleOwner, state.selectedFactoryId) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                delay(30_000)
+                viewModel.refreshProductionOptions()
+            }
+        }
+    }
     if (!state.handoverChecked || state.pendingHandover != null) {
         com.production.supervisor.ui.screens.handover.HandoverGate(state, viewModel)
         return
@@ -307,14 +320,12 @@ private fun MachineTable(
         "target_cycle_production" to asset.targetCycleProduction.toString(), "target_cycle_unit_name" to asset.targetCycleUnitName.orEmpty()
     )).toString() }
     val defaults = remember(baseline) { JSONObject(baseline) }
-    val packagingOptions = listOf("كرتونة", "كيلو", "شيكاره", "قطعة")
+    val materialOptions = state.productionOptions.filter { it.category == "RAW_MATERIAL" }.map { it.name }
+    val packagingOptions = state.productionOptions.filter { it.category == "PACKAGING" }.map { it.name }
+    val unitOptions = state.productionOptions.filter { it.category == "FINAL_UNIT" }.map { it.name }
     val initialUnit = entry?.finalProductionUnitName?.ifBlank { null }
         ?: defaults.optString("final_production_unit_name").ifBlank { null }
-        ?: "كيلو"
-    val normalizedUnit = when (initialUnit) {
-        "كجم", "كيلوجرام" -> "كيلو"
-        else -> initialUnit
-    }
+        ?: unitOptions.firstOrNull().orEmpty()
     var worker by rememberSaveable { mutableStateOf(entry?.operatorName ?: defaults.optString("operator_name")) }
     var product by rememberSaveable { mutableStateOf(entry?.productName ?: defaults.optString("product_name")) }
     var cavities by rememberSaveable { mutableStateOf((entry?.currentCavities ?: asset.originalCavities).toString()) }
@@ -324,7 +335,7 @@ private fun MachineTable(
     var material by rememberSaveable { mutableStateOf(entry?.rawMaterial ?: defaults.optString("raw_material")) }
     var packaging by rememberSaveable { mutableStateOf(entry?.packagingType ?: defaults.optString("packaging_type")) }
     var quantity by rememberSaveable { mutableStateOf(entry?.finalProductionQuantity?.toString() ?: "") }
-    var unit by rememberSaveable { mutableStateOf(normalizedUnit) }
+    var unit by rememberSaveable { mutableStateOf(initialUnit) }
     var mode by rememberSaveable { mutableStateOf(entry?.operationMode ?: "AUTO") }
     var notes by rememberSaveable { mutableStateOf(entry?.notes ?: "") }
     var changed by rememberSaveable { mutableStateOf(false) }
@@ -333,19 +344,18 @@ private fun MachineTable(
         pending?.let { saved -> if (entry?.copy(id = 0).toString() == saved) { changed = false; pending = null } }
     }
     LaunchedEffect(changed) { onDirty(changed) }
-    val selectedUnit = state.productionOptions.find { it.category == "FINAL_UNIT" && (it.name == unit.trim() || (unit.trim() in setOf("كيلو", "كجم", "كيلوجرام") && it.name in setOf("كجم", "كيلو", "كيلوجرام")) || (unit.trim() in setOf("شيكاره", "شيكارة") && it.name in setOf("شيكاره", "شيكارة"))) }
-        ?: state.productionOptions.find { it.category == "FINAL_UNIT" && it.id == asset.defaultFinalUnitId }
-        ?: state.productionOptions.firstOrNull { it.category == "FINAL_UNIT" && it.name in setOf("كجم", "كيلو", "كيلوجرام") }
-        ?: state.productionOptions.firstOrNull { it.category == "FINAL_UNIT" }
+    val selectedUnit = state.productionOptions.find { it.category == "FINAL_UNIT" && it.name == unit.trim() }
+    val selectedMaterial = state.productionOptions.find { it.category == "RAW_MATERIAL" && it.name == material.trim() }
+    val selectedPackaging = state.productionOptions.find { it.category == "PACKAGING" && it.name == packaging.trim() }
     val valid = quantity.toDoubleOrNull()?.let { it.isFinite() && it >= 0 } == true &&
         cavities.toIntOrNull()?.let { it > 0 } == true && original.toIntOrNull()?.let { it > 0 } == true &&
         cooling.toDoubleOrNull()?.let { it.isFinite() && it >= 0 } == true && cycle.toDoubleOrNull()?.let { it.isFinite() && it >= 0 } == true &&
-        unit.isNotBlank()
-    val draftEntry = if (valid && !isStopped) {
+        selectedUnit != null
+    val draftEntry = if (valid && selectedUnit != null && !isStopped) {
                 val q = quantity.toDouble()
                 val workerId = state.operators.find { it.name == worker.trim() }?.id
                 val productId = state.products.find { it.name == product.trim() }?.id
-                val unitKgFactor = if (unit.trim() in setOf("كيلو", "كجم", "كيلوجرام")) 1.0 else (selectedUnit?.kgPerUnit ?: 0.0)
+                val unitKgFactor = selectedUnit.kgPerUnit ?: 0.0
                 MachineEntryEntity(id = entry?.id ?: 0, clientReportId = state.currentReportId, assetId = asset.id, assetCode = asset.assetCode,
                     operatorId = workerId, operatorName = worker.trim(), originalOperatorId = if (entry != null) entry.originalOperatorId else asset.defaultOperatorId,
                     originalOperatorName = defaults.optString("operator_name"), operatorChanged = worker.trim() != defaults.optString("operator_name"),
@@ -354,8 +364,9 @@ private fun MachineTable(
                     originalCavities = original.toInt(), currentCavities = cavities.toInt(), coolingTimeSeconds = cooling.toDouble(), cycleTimeSeconds = cycle.toDouble(),
                     originalCoolingTimeSeconds = defaults.optString("cooling_time_seconds").toDoubleOrNull() ?: 0.0,
                     originalCycleTimeSeconds = defaults.optString("cycle_time_seconds").toDoubleOrNull() ?: 0.0,
-                    operationMode = mode, rawMaterial = material.trim(), packagingType = packaging.trim(), finalProductionQuantity = q,
-                    finalProductionUnitId = selectedUnit?.id ?: asset.defaultFinalUnitId, finalProductionUnitName = unit.trim(), finalProductionWeightKg = q * unitKgFactor,
+                    operationMode = mode, rawMaterial = material.trim(), rawMaterialOptionId = selectedMaterial?.id,
+                    packagingType = packaging.trim(), packagingOptionId = selectedPackaging?.id, finalProductionQuantity = q,
+                    finalProductionUnitId = selectedUnit.id, finalProductionUnitName = selectedUnit.name, finalProductionWeightKg = q * unitKgFactor,
                     targetCycleProduction = defaults.optString("target_cycle_production").toDoubleOrNull() ?: 0.0,
                     targetCycleUnitName = defaults.optString("target_cycle_unit_name"), notes = notes, dashboardDefaults = baseline)
     } else null
@@ -468,7 +479,7 @@ private fun MachineTable(
                 TableCell("التبريد (ث)", defaults.optString("cooling_time_seconds"), cooling, enabled, true) { cooling = it; changed = true }
                 TableCell("الدورة (ث)", defaults.optString("cycle_time_seconds"), cycle, enabled, true) { cycle = it; changed = true }
                 TableDropdown("الخامة", defaults.optString("raw_material"), material,
-                    listOf("بورسلين", "ABS", "P.P", "Hip", "P.C", "كرستال", "انتي شوك"), enabled) { material = it; changed = true }
+                    materialOptions, enabled) { material = it; changed = true }
                 TableDropdown("العبوة", defaults.optString("packaging_type"), packaging,
                     packagingOptions, enabled) { packaging = it; changed = true }
                 HorizontalDivider()
@@ -556,7 +567,7 @@ private fun MachineTable(
                     )
                 }
                 TableCell("كمية الإنتاج", "", quantity, enabled, true) { quantity = it; changed = true }
-                TableDropdown("وحدة الإنتاج", defaults.optString("final_production_unit_name"), unit, packagingOptions, enabled) { unit = it; changed = true }
+                TableDropdown("وحدة الإنتاج", defaults.optString("final_production_unit_name"), unit, unitOptions, enabled) { unit = it; changed = true }
                 Text("المستهدف: ${defaults.optString("target_cycle_production")} ${defaults.optString("target_cycle_unit_name")}", modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp), fontSize = 12.sp)
                 TableCell("ملاحظات", "", notes, enabled) { notes = it; changed = true }
                 if (!valid && changed) Text("راجع الأرقام والبيانات المدخلة.", color = MaterialTheme.colorScheme.error, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))

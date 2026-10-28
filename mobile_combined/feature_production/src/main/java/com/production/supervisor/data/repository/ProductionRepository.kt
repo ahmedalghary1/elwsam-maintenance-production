@@ -43,6 +43,22 @@ class ProductionRepository @Inject constructor(
     fun getProductsFlow(): Flow<List<ProductEntity>> = dao.getProductsFlow()
     fun getOperatorsFlow(): Flow<List<OperatorEntity>> = dao.getOperatorsFlow()
     fun getProductionOptionsFlow(): Flow<List<ProductionOptionEntity>> = dao.getProductionOptionsFlow()
+
+    suspend fun refreshProductionOptions(factoryId: Int): Result<Unit> = try {
+        val response = api.getBootstrap(factoryId.toString())
+        val data = response.body()?.takeIf { response.isSuccessful }
+            ?: throw IllegalStateException("تعذر تحديث اختيارات الإنتاج (${response.code()})")
+        check(data.factory.id == factoryId) { "تغيّر المصنع أثناء تحديث اختيارات الإنتاج" }
+        check(getCachedFactoryId() == factoryId) { "تغيّر المصنع أثناء تحديث اختيارات الإنتاج" }
+        dao.replaceProductionOptions(data.productionOptions.map { option ->
+            ProductionOptionEntity(option.id, option.category, option.name, option.kgPerUnit)
+        })
+        Result.success(Unit)
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (error: Exception) {
+        Result.failure(error)
+    }
     fun getEntriesFlow(reportId: String): Flow<List<MachineEntryEntity>> = dao.getEntriesForReportFlow(reportId)
     fun getStoppagesFlow(reportId: String): Flow<List<StoppageEntity>> = dao.getStoppagesForReportFlow(reportId)
     fun getShiftReportFlow(reportId: String): Flow<ShiftReportEntity?> = dao.getShiftReportFlow(reportId)
