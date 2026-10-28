@@ -12,6 +12,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -26,6 +28,7 @@ import kotlinx.serialization.decodeFromString
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.focus.onFocusChanged
@@ -64,6 +67,19 @@ fun ProductionTableScreen(viewModel: ProductionHomeViewModel, onLogout: () -> Un
 @Composable
 private fun ProductionTableContent(viewModel: ProductionHomeViewModel, onLogout: () -> Unit) {
     val state by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
+    val orderPreferences = remember(context) { context.getSharedPreferences("production_machine_order", android.content.Context.MODE_PRIVATE) }
+    val orderKey = "factory_${state.selectedFactoryId ?: 0}"
+    var machineOrder by remember(orderKey) {
+        mutableStateOf(orderPreferences.getString(orderKey, "").orEmpty().split(',').mapNotNull { it.toIntOrNull() })
+    }
+    val orderedAssets = remember(state.assets, machineOrder) {
+        val positions = machineOrder.withIndex().associate { it.value to it.index }
+        state.assets.sortedWith(compareBy<AssetEntity> { positions[it.id] ?: Int.MAX_VALUE }
+            .thenBy { it.sequenceOrder }.thenBy { it.id })
+    }
+    val assetPositions = remember(orderedAssets) { orderedAssets.withIndex().associate { it.value.id to it.index } }
+    var showMachineOrder by remember { mutableStateOf(false) }
     val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(lifecycleOwner, state.selectedFactoryId) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -112,6 +128,8 @@ private fun ProductionTableContent(viewModel: ProductionHomeViewModel, onLogout:
                     DropdownMenuItem(text = { Text("توقف ماكينة / مدة التوقف") }, enabled = editable,
                         onClick = { showActions = false; viewModel.openStoppageDialog() })
                     DropdownMenuItem(text = { Text("إعادة المزامنة") }, onClick = { showActions = false; viewModel.retrySync() })
+                    DropdownMenuItem(text = { Text("ترتيب الماكينات") }, enabled = orderedAssets.size > 1,
+                        onClick = { showActions = false; showMachineOrder = true })
                     DropdownMenuItem(text = { Text("تحديث البيانات") }, enabled = editable && dirty.values.none { it },
                         onClick = { showActions = false; viewModel.loadData() })
                     if (state.pendingHandover != null) DropdownMenuItem(text = { Text("استلام الوردية السابقة") },
@@ -177,7 +195,7 @@ private fun ProductionTableContent(viewModel: ProductionHomeViewModel, onLogout:
             if (state.assets.isEmpty() && !state.isLoading) item {
                 Text("لا توجد ماكينات. حدّث البيانات للتحقق من المصنع.")
             }
-            items(if (state.isLoading || state.currentReportId.isBlank()) emptyList() else state.assets, key = { "${state.currentReportId}:${it.id}:${state.entries[it.id]?.id ?: 0}" }) { asset ->
+            items(if (state.isLoading || state.currentReportId.isBlank()) emptyList() else orderedAssets, key = { "${state.currentReportId}:${it.id}:${state.entries[it.id]?.id ?: 0}" }) { asset ->
                 MachineTable(
                     asset = asset,
                     entry = state.entries[asset.id],
@@ -200,7 +218,7 @@ private fun ProductionTableContent(viewModel: ProductionHomeViewModel, onLogout:
                     onSave = viewModel::saveMachineEntry
                 )
             }
-            items(state.stoppages, key = { "fault:${it.id}" }) { fault ->
+            items(state.stoppages.sortedWith(compareBy<StoppageEntity> { assetPositions[it.assetId] ?: Int.MAX_VALUE }.thenBy { it.id }), key = { "fault:${it.id}" }) { fault ->
                 Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(12.dp)) {
                     Text(if (fault.assetId == null) "أعطال عامة" else "توقف ${fault.assetCode}", fontWeight = FontWeight.Bold)
                     Text(fault.description)
@@ -209,6 +227,41 @@ private fun ProductionTableContent(viewModel: ProductionHomeViewModel, onLogout:
             }
         }
     }
+    if (showMachineOrder) AlertDialog(
+        onDismissRequest = { showMachineOrder = false },
+        title = { Text("ترتيب الماكينات", fontWeight = FontWeight.Bold) },
+        text = {
+            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 420.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                items(orderedAssets, key = { it.id }) { asset ->
+                    val index = assetPositions.getValue(asset.id)
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("${index + 1}. ${asset.assetCode} • ${asset.productionTitle}", Modifier.weight(1f), fontSize = 13.sp)
+                        IconButton(onClick = {
+                            val ids = orderedAssets.map { it.id }.toMutableList()
+                            java.util.Collections.swap(ids, index, index - 1)
+                            machineOrder = ids
+                            orderPreferences.edit().putString(orderKey, ids.joinToString(",")).apply()
+                        }, enabled = index > 0) {
+                            Icon(Icons.Default.KeyboardArrowUp, contentDescription = "نقل ${asset.assetCode} لأعلى")
+                        }
+                        IconButton(onClick = {
+                            val ids = orderedAssets.map { it.id }.toMutableList()
+                            java.util.Collections.swap(ids, index, index + 1)
+                            machineOrder = ids
+                            orderPreferences.edit().putString(orderKey, ids.joinToString(",")).apply()
+                        }, enabled = index < orderedAssets.lastIndex) {
+                            Icon(Icons.Default.KeyboardArrowDown, contentDescription = "نقل ${asset.assetCode} لأسفل")
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { showMachineOrder = false }) { Text("تم") } },
+        dismissButton = { TextButton(onClick = {
+            orderPreferences.edit().remove(orderKey).apply()
+            machineOrder = emptyList()
+        }) { Text("ترتيب الموقع") } }
+    )
     if (showFaults) AlertDialog(
         onDismissRequest = { showFaults = false },
         title = { Text("جميع أعطال الوردية", fontWeight = FontWeight.Bold) },
@@ -271,7 +324,7 @@ private fun ProductionTableContent(viewModel: ProductionHomeViewModel, onLogout:
             OutlinedButton(onClick = { finish = false }) { Text("رجوع") }
         }
     )
-    if (state.isStoppageDialogVisible) StoppageDialog(state.assets, state.currentReportId, { viewModel.closeStoppageDialog() }, { viewModel.addStoppage(it) })
+    if (state.isStoppageDialogVisible) StoppageDialog(orderedAssets, state.currentReportId, { viewModel.closeStoppageDialog() }, { viewModel.addStoppage(it) })
     if (machineForStoppage != null) {
         val assetToStop = machineForStoppage!!
         val currentStoppage = state.stoppages.findLast { it.assetId == assetToStop.id && it.clientReportId == state.currentReportId }
@@ -351,7 +404,7 @@ private fun MachineTable(
         cavities.toIntOrNull()?.let { it > 0 } == true && original.toIntOrNull()?.let { it > 0 } == true &&
         cooling.toDoubleOrNull()?.let { it.isFinite() && it >= 0 } == true && cycle.toDoubleOrNull()?.let { it.isFinite() && it >= 0 } == true &&
         selectedUnit != null
-    val draftEntry = if (valid && selectedUnit != null && !isStopped) {
+    val draftEntry = if (valid && !isStopped) {
                 val q = quantity.toDouble()
                 val workerId = state.operators.find { it.name == worker.trim() }?.id
                 val productId = state.products.find { it.name == product.trim() }?.id
