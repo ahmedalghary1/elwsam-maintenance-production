@@ -8,6 +8,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
+import org.json.JSONObject
 import javax.inject.Singleton
 
 /** Serializes uploads and only acknowledges the exact local revision that was sent. */
@@ -28,7 +29,7 @@ class ReportSynchronizer @Inject constructor(
                 val response = api.syncShiftReport(snapshot.toInput())
                 if (!response.isSuccessful) {
                     return@withLock Result.failure(
-                        IllegalStateException("تعذر إرسال التقرير (${response.code()}). البيانات محفوظة على الهاتف.")
+                        IllegalStateException(extractServerDetail(runCatching { response.errorBody()?.string() }.getOrNull()) ?: "تعذر إرسال التقرير (${response.code()}). البيانات محفوظة على الهاتف.")
                     )
                 }
                 val acknowledged = dao.markSnapshotSynced(
@@ -111,3 +112,12 @@ internal fun ReportSnapshot.toInput() = SyncShiftReportInputDto(
         StoppageInputDto(it.assetId, it.stoppageType, it.description, it.durationMinutes, it.actionTaken)
     }
 )
+
+private fun extractServerDetail(raw: String?): String? {
+    if (raw.isNullOrBlank()) return null
+    return runCatching {
+        val obj = JSONObject(raw)
+        obj.optString("detail").takeIf { it.isNotBlank() }
+            ?: obj.optString("reason").takeIf { it.isNotBlank() }
+    }.getOrNull()
+}
