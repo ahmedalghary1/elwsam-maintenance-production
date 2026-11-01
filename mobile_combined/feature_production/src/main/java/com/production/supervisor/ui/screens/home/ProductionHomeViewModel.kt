@@ -13,6 +13,8 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.LocalTime
 import java.time.ZoneId
 import javax.inject.Inject
 
@@ -252,6 +254,10 @@ class ProductionHomeViewModel @Inject constructor(
 
     fun setShift(shift: String) {
         if (_uiState.value.isLoading || _uiState.value.isSavingEntry || _uiState.value.isFinishingShift) return
+        if (_uiState.value.currentUser?.role != "ADMIN" && shift != _uiState.value.currentUser?.shift) {
+            _uiState.update { it.copy(message = "يمكنك فتح تقرير ورديتك المخصصة فقط") }
+            return
+        }
         viewModelScope.launch {
             try {
                 val report = repository.getOrCreateShiftReport(_uiState.value.currentDate, shift)
@@ -501,6 +507,10 @@ class ProductionHomeViewModel @Inject constructor(
 
     private fun canEditReport(): Boolean {
         val state = _uiState.value
+        if (!reportWindowOpen(state.selectedShift, state.currentDate)) {
+            _uiState.update { it.copy(message = "انتهى وقت تقرير الوردية. المهلة ساعتان فقط بعد نهايتها.") }
+            return false
+        }
         if (!state.handoverChecked || state.pendingHandover != null) {
             _uiState.update { it.copy(message = "راجع تقرير المشرف السابق أولاً", isHandoverDialogVisible = it.pendingHandover != null) }
             return false
@@ -511,6 +521,18 @@ class ProductionHomeViewModel @Inject constructor(
         }
         return !state.isLoading && !state.isSavingEntry && !state.isFinishingShift && state.currentReportId.isNotBlank()
     }
+
+    private fun reportWindowOpen(shift: String, date: String): Boolean = runCatching {
+        val startTime = when (shift) {
+            "FIRST" -> LocalTime.of(7, 0)
+            "SECOND" -> LocalTime.of(15, 0)
+            "THIRD" -> LocalTime.of(23, 0)
+            else -> return false
+        }
+        val start = LocalDateTime.of(LocalDate.parse(date), startTime)
+        val now = LocalDateTime.now(ZoneId.of("Africa/Cairo"))
+        !now.isBefore(start) && !now.isAfter(start.plusHours(10))
+    }.getOrDefault(false)
 
     private fun validMachineValues(quantity: Double, currentCavities: Int, originalCavities: Int,
                                    cooling: Double, cycle: Double): Boolean {

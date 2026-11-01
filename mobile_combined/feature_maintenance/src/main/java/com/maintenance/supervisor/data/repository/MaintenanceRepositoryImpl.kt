@@ -192,13 +192,18 @@ class MaintenanceRepositoryImpl @Inject constructor(
             dao.putMetadata(MetadataEntity("selection_mode", value.selectionMode))
         }
         AppResult.Success(Unit)
-    } catch (t: Throwable) { AppResult.Error("تعذر تحميل بيانات المصنع. يمكنك متابعة العمل بالبيانات المحفوظة.", t) }
+    } catch (t: Throwable) {
+        if (t is retrofit2.HttpException && t.code() == 403) {
+            AppResult.Error("الصيانة متاحة للمشرف المكلّف بالوردية الصباحية فقط.", t)
+        } else AppResult.Error("تعذر تحميل بيانات المصنع. يمكنك متابعة العمل بالبيانات المحفوظة.", t)
+    }
 
     }
 
     override suspend fun startOrLoadToday(): AppResult<MaintenanceReport> {
         return try {
         val today = LocalDate.now(clock.withZone(cairo))
+        if (!morningWindowOpen()) return AppResult.Error("تقرير الصيانة متاح خلال الوردية الصباحية وحتى ساعتين بعد نهايتها فقط.")
         if (today.dayOfWeek == DayOfWeek.FRIDAY) return AppResult.Error("الجمعة عطلة الصيانة الأسبوعية. ستظهر الماكينة نفسها في يوم العمل التالي.")
         val todayStr = today.toString()
         val snapshot = observeHome().map { it.daily }.firstNonNull()
@@ -310,7 +315,9 @@ class MaintenanceRepositoryImpl @Inject constructor(
         mechanical: String,
         electrical: String,
         manager: String
-    ): AppResult<Unit> = try {
+    ): AppResult<Unit> = if (!morningWindowOpen()) {
+        AppResult.Error("انتهى وقت تقرير الصيانة. المهلة ساعتان بعد الوردية الصباحية فقط.")
+    } else try {
         reportWriteMutex.withLock { db.withTransaction {
             val report = dao.report(reportId)?.report ?: error("missing report")
             // Don't allow completing a locked report
@@ -346,6 +353,12 @@ class MaintenanceRepositoryImpl @Inject constructor(
         } }
         AppResult.Success(Unit)
     } catch (t: Throwable) { AppResult.Error("تعذر حفظ التقرير على الهاتف.", t) }
+
+    private fun morningWindowOpen(): Boolean {
+        val local = java.time.LocalTime.now(clock.withZone(cairo))
+        return !local.isBefore(java.time.LocalTime.of(7, 0)) &&
+            !local.isAfter(java.time.LocalTime.of(17, 0))
+    }
 
     override suspend fun sync(): AppResult<Unit> = try {
         var retryableFailure: Throwable? = null
