@@ -49,8 +49,11 @@ object NetworkModule {
 
         val authInterceptor = Interceptor { chain ->
             val original = chain.request()
-            val token = runBlocking { tokenManager.getAccessToken() }
-            val requestBuilder = original.newBuilder()
+            val (token, userId) = runBlocking { tokenManager.requestIdentity() }
+            val requestBuilder = original.newBuilder().tag(
+                com.production.supervisor.data.remote.RequestOwner::class.java,
+                com.production.supervisor.data.remote.RequestOwner(userId)
+            )
             if (!token.isNullOrBlank()) {
                 requestBuilder.header("Authorization", "Bearer $token")
             }

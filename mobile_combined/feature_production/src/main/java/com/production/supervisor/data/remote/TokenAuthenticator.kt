@@ -14,6 +14,8 @@ import javax.inject.Provider
 import javax.inject.Singleton
 import kotlin.concurrent.withLock
 
+data class RequestOwner(val userId: Int?)
+
 @Singleton
 class TokenAuthenticator @Inject constructor(
     private val tokenManager: TokenManager,
@@ -27,8 +29,11 @@ class TokenAuthenticator @Inject constructor(
 
         return lock.withLock {
             runBlocking {
+                val owner = response.request.tag(RequestOwner::class.java) ?: return@runBlocking null
+                val (access, userId) = tokenManager.requestIdentity()
+                if (owner.userId != userId) return@runBlocking null
                 val oldHeader = response.request.header("Authorization")
-                val currentToken = tokenManager.getAccessToken()?.let { "Bearer $it" }
+                val currentToken = access?.let { "Bearer $it" }
 
                 if (currentToken != null && currentToken != oldHeader) {
                     return@runBlocking response.request.newBuilder()
@@ -40,15 +45,16 @@ class TokenAuthenticator @Inject constructor(
                 try {
                     val authApi = authApiProvider.get()
                     val refreshResponse = authApi.refreshToken(RefreshTokenRequestDto(refreshToken))
+                    // A response from a retired account must not replace the new login.
                     if (refreshResponse.isSuccessful && refreshResponse.body() != null) {
                         val body = refreshResponse.body()!!
-                        tokenManager.updateAccessToken(body.access, body.refresh)
+                        if (!tokenManager.saveRefreshed(refreshToken, body.access, body.refresh)) return@runBlocking null
                         response.request.newBuilder()
                             .header("Authorization", "Bearer ${body.access}")
                             .build()
                     } else {
                         if (refreshResponse.code() == 401 || refreshResponse.code() == 400) {
-                            tokenManager.clear()
+                            tokenManager.clearIfCurrent(refreshToken)
                         }
                         null
                     }

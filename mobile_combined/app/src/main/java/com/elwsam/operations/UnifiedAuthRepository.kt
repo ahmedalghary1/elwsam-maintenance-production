@@ -1,6 +1,6 @@
 package com.elwsam.operations
 
-import com.maintenance.supervisor.data.security.TokenStore
+import com.maintenance.supervisor.data.security.MaintenanceSession
 import com.production.supervisor.data.local.datastore.TokenManager
 import com.production.supervisor.data.repository.AuthRepository
 import kotlinx.coroutines.flow.first
@@ -11,12 +11,14 @@ import javax.inject.Singleton
 class UnifiedAuthRepository @Inject constructor(
     private val productionAuth: AuthRepository,
     private val productionTokens: TokenManager,
-    private val maintenanceTokens: TokenStore,
+    private val maintenanceSession: MaintenanceSession,
     private val sessions: SessionStore
 ) {
     val session = sessions.session
 
     suspend fun login(phone: String, password: String): Result<Unit> {
+        // Retire the old maintenance cache before installing another identity.
+        maintenanceSession.clear()
         val result = productionAuth.login(phone, password)
         if (result.isFailure) return result
 
@@ -31,7 +33,14 @@ class UnifiedAuthRepository @Inject constructor(
             logout()
             return Result.failure(IllegalStateException("لم يرسل الخادم جلسة صالحة."))
         }
-        maintenanceTokens.save(access, refresh)
+        val userId = productionTokens.getUserId()
+        if (userId == null) {
+            logout()
+            return Result.failure(IllegalStateException("تعذر تحديد بيانات الحساب. أعد تسجيل الدخول."))
+        }
+        if (role in setOf("MAINTENANCE_SUPERVISOR", "GENERAL_SUPERVISOR")) {
+            maintenanceSession.activate(access, refresh, userId)
+        }
         val name = productionTokens.userNameFlow.first().orEmpty().ifBlank { phone.trim() }
         sessions.save(role, name)
         return Result.success(Unit)
@@ -39,7 +48,7 @@ class UnifiedAuthRepository @Inject constructor(
 
     suspend fun logout() {
         productionAuth.logout()
-        maintenanceTokens.clear()
+        maintenanceSession.clear()
         sessions.clear()
     }
 

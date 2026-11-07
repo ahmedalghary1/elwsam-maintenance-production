@@ -68,6 +68,7 @@ import kotlinx.serialization.Serializable
 // Bootstrap response matches BootstrapView.get() output
 @Serializable data class BootstrapDto(
     val user: UserDto,
+    @SerialName("can_submit_report") val canSubmitReport: Boolean = true,
     val factory: FactoryDto = user.factory,
     @SerialName("active_assets") val assets: List<AssetDto> = emptyList(),
     @SerialName("checklist_templates") val checklistTemplates: List<ChecklistTemplateDto> = emptyList(),

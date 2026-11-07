@@ -9,6 +9,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -18,6 +19,7 @@ private val Context.dataStore by preferencesDataStore(name = "production_supervi
 class TokenManager @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
+    val sessionMutex = Mutex()
     companion object {
         val ACCESS_TOKEN_KEY = stringPreferencesKey("access_token")
         val REFRESH_TOKEN_KEY = stringPreferencesKey("refresh_token")
@@ -42,6 +44,9 @@ class TokenManager @Inject constructor(
     suspend fun getSelectedFactoryName(): String? = context.dataStore.data.first()[SELECTED_FACTORY_NAME_KEY]
     suspend fun getAssignedShift(): String? = context.dataStore.data.first()[ASSIGNED_SHIFT_KEY]
     suspend fun getUserId(): Int? = context.dataStore.data.first()[USER_ID_KEY]
+    suspend fun requestIdentity(): Pair<String?, Int?> = context.dataStore.data.first().let {
+        it[ACCESS_TOKEN_KEY] to it[USER_ID_KEY]
+    }
 
     suspend fun saveUserId(userId: Int) {
         context.dataStore.edit { it[USER_ID_KEY] = userId }
@@ -57,6 +62,8 @@ class TokenManager @Inject constructor(
 
     suspend fun saveTokens(access: String, refresh: String, phone: String, name: String, role: String, userId: Int?) {
         context.dataStore.edit { prefs ->
+            // Factory and shift choices belong to the previous login session.
+            prefs.clear()
             prefs[ACCESS_TOKEN_KEY] = access
             prefs[REFRESH_TOKEN_KEY] = refresh
             prefs[USER_PHONE_KEY] = phone
@@ -73,6 +80,22 @@ class TokenManager @Inject constructor(
                 prefs[REFRESH_TOKEN_KEY] = newRefresh
             }
         }
+    }
+
+    suspend fun saveRefreshed(expectedRefresh: String, access: String, refresh: String?): Boolean {
+        var saved = false
+        context.dataStore.edit { prefs ->
+            if (prefs[REFRESH_TOKEN_KEY] == expectedRefresh) {
+                prefs[ACCESS_TOKEN_KEY] = access
+                prefs[REFRESH_TOKEN_KEY] = refresh ?: expectedRefresh
+                saved = true
+            }
+        }
+        return saved
+    }
+
+    suspend fun clearIfCurrent(expectedRefresh: String) = context.dataStore.edit {
+        if (it[REFRESH_TOKEN_KEY] == expectedRefresh) it.clear()
     }
 
     suspend fun saveSelectedFactory(id: String?, name: String?) {

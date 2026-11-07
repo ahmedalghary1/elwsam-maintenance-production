@@ -12,10 +12,14 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.concurrent.withLock
 
+data class RequestOwner(val userId: Int?)
+
 class BearerInterceptor @Inject constructor(private val tokens: TokenStore) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
-        val token = runBlocking { tokens.accessToken() }
-        val request = if (token == null) chain.request() else chain.request().newBuilder().header("Authorization", "Bearer $token").build()
+        val (token, userId) = runBlocking { tokens.requestIdentity() }
+        val builder = chain.request().newBuilder().tag(RequestOwner::class.java, RequestOwner(userId))
+        if (token != null) builder.header("Authorization", "Bearer $token")
+        val request = builder.build()
         return chain.proceed(request)
     }
 }
@@ -27,21 +31,24 @@ class TokenAuthenticator @Inject constructor(private val tokens: TokenStore, pri
         if (responseCount(response) >= 2) return null
         return lock.withLock {
             runBlocking {
+                val owner = response.request.tag(RequestOwner::class.java) ?: return@runBlocking null
+                val (access, userId) = tokens.requestIdentity()
+                if (owner.userId != userId) return@runBlocking null
                 val old = response.request.header("Authorization")
-                val current = tokens.accessToken()?.let { "Bearer $it" }
+                val current = access?.let { "Bearer $it" }
                 if (current != null && current != old) return@runBlocking response.request.newBuilder().header("Authorization", current).build()
                 val refresh = tokens.refreshToken() ?: return@runBlocking null
                 try {
                     val result = refreshApi.refresh(RefreshRequest(refresh))
-                    tokens.save(result.access, result.refresh ?: refresh)
+                    if (!tokens.saveRefreshed(refresh, result.access, result.refresh)) return@runBlocking null
                     response.request.newBuilder().header("Authorization", "Bearer ${result.access}").build()
                 } catch (e: retrofit2.HttpException) {
-                    if (e.code() == 401 || e.code() == 400) tokens.clear()
+                    if (e.code() == 401 || e.code() == 400) tokens.clearIfCurrent(refresh)
                     null
                 } catch (e: java.io.IOException) {
                     null // Network error, do not clear tokens
                 } catch (e: Exception) {
-                    tokens.clear()
+                    tokens.clearIfCurrent(refresh)
                     null
                 }
             }

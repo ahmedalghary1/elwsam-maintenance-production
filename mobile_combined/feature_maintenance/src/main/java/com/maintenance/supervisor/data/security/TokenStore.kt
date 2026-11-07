@@ -4,6 +4,7 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -26,6 +27,9 @@ private val Context.tokenDataStore by preferencesDataStore("secure_session")
 class TokenStore @Inject constructor(@ApplicationContext private val context: Context) {
     private val accessKey = stringPreferencesKey("access")
     private val refreshKey = stringPreferencesKey("refresh")
+    private val userIdKey = intPreferencesKey("user_id")
+    val userId = context.tokenDataStore.data.map { it[userIdKey] }.distinctUntilChanged()
+    suspend fun bindUser(id: Int) = context.tokenDataStore.edit { it[userIdKey] = id }
     private val alias = "maintenance_session_key"
     val sessionActive = context.tokenDataStore.data.map { preferences ->
         preferences[refreshKey]?.let(::decrypt) != null
@@ -33,11 +37,28 @@ class TokenStore @Inject constructor(@ApplicationContext private val context: Co
 
     suspend fun accessToken(): String? = context.tokenDataStore.data.first()[accessKey]?.let(::decrypt)
     suspend fun refreshToken(): String? = context.tokenDataStore.data.first()[refreshKey]?.let(::decrypt)
+    suspend fun requestIdentity(): Pair<String?, Int?> = context.tokenDataStore.data.first().let {
+        it[accessKey]?.let(::decrypt) to it[userIdKey]
+    }
     suspend fun save(access: String, refresh: String?) = context.tokenDataStore.edit {
         it[accessKey] = encrypt(access)
         if (refresh != null) it[refreshKey] = encrypt(refresh)
     }
-    suspend fun clear() = context.tokenDataStore.edit { it.remove(accessKey); it.remove(refreshKey) }
+    suspend fun saveRefreshed(expectedRefresh: String, access: String, refresh: String?): Boolean {
+        var saved = false
+        context.tokenDataStore.edit {
+            if (it[refreshKey]?.let(::decrypt) == expectedRefresh) {
+                it[accessKey] = encrypt(access)
+                it[refreshKey] = encrypt(refresh ?: expectedRefresh)
+                saved = true
+            }
+        }
+        return saved
+    }
+    suspend fun clearIfCurrent(expectedRefresh: String) = context.tokenDataStore.edit {
+        if (it[refreshKey]?.let(::decrypt) == expectedRefresh) it.clear()
+    }
+    suspend fun clear() = context.tokenDataStore.edit { it.clear() }
     suspend fun hasSession(): Boolean = refreshToken() != null
 
     private fun key(): SecretKey {

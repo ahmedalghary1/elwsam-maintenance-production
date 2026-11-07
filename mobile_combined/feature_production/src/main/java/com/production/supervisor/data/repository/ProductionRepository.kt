@@ -9,6 +9,7 @@ import com.production.supervisor.data.remote.dto.*
 import com.production.supervisor.data.sync.ProductionSyncScheduler
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.sync.withLock
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.util.UUID
@@ -45,7 +46,9 @@ class ProductionRepository @Inject constructor(
     fun getOperatorsFlow(): Flow<List<OperatorEntity>> = dao.getOperatorsFlow()
     fun getProductionOptionsFlow(): Flow<List<ProductionOptionEntity>> = dao.getProductionOptionsFlow()
 
-    suspend fun refreshProductionOptions(factoryId: Int): Result<Unit> = try {
+    suspend fun refreshProductionOptions(factoryId: Int): Result<Unit> = tokenManager.sessionMutex.withLock { refreshProductionOptionsInternal(factoryId) }
+
+    private suspend fun refreshProductionOptionsInternal(factoryId: Int): Result<Unit> = try {
         val response = api.getBootstrap(factoryId.toString())
         val data = response.body()?.takeIf { response.isSuccessful }
             ?: throw IllegalStateException("تعذر تحديث اختيارات الإنتاج (${response.code()})")
@@ -68,7 +71,9 @@ class ProductionRepository @Inject constructor(
     fun getStoppagesFlow(reportId: String): Flow<List<StoppageEntity>> = dao.getStoppagesForReportFlow(reportId)
     fun getShiftReportFlow(reportId: String): Flow<ShiftReportEntity?> = dao.getShiftReportFlow(reportId)
 
-    suspend fun refreshBootstrap(factoryId: String? = null): Result<ProductionBootstrapDto> {
+    suspend fun refreshBootstrap(factoryId: String? = null): Result<ProductionBootstrapDto> = tokenManager.sessionMutex.withLock { refreshBootstrapInternal(factoryId) }
+
+    private suspend fun refreshBootstrapInternal(factoryId: String?): Result<ProductionBootstrapDto> {
         return try {
             val previousFactoryId = getCachedFactoryId()
             val targetFactoryId = factoryId ?: previousFactoryId?.toString()

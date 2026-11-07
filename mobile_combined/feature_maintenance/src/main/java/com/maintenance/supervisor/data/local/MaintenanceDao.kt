@@ -30,13 +30,13 @@ interface MaintenanceDao {
     @Query("SELECT * FROM factories LIMIT 1") fun observeFactory(): Flow<FactoryEntity?>
     @Query("SELECT * FROM assets WHERE active = 1 ORDER BY sequence") fun observeAssets(): Flow<List<AssetEntity>>
     @Query("SELECT * FROM current_maintenance WHERE singletonId = 1") fun observeCurrent(): Flow<CurrentMaintenanceEntity?>
-    @Transaction @Query("SELECT * FROM reports WHERE ownerUserId = (SELECT id FROM users LIMIT 1) ORDER BY reportDate") fun observeReports(): Flow<List<ReportWithAnswers>>
+    @Transaction @Query("SELECT * FROM reports WHERE ownerUserId = (SELECT id FROM users LIMIT 1) OR clientReportId = (SELECT value FROM metadata WHERE `key` = 'server_report_id') ORDER BY reportDate") fun observeReports(): Flow<List<ReportWithAnswers>>
     @Transaction @Query("SELECT * FROM reports WHERE clientReportId = :id") suspend fun report(id: String): ReportWithAnswers?
     @Transaction @Query("SELECT * FROM reports WHERE reportDate = :date AND ownerUserId = (SELECT id FROM users LIMIT 1) LIMIT 1") suspend fun reportForDate(date: String): ReportWithAnswers?
-    @Transaction @Query("SELECT * FROM reports WHERE reportDate = :date AND ownerUserId = (SELECT id FROM users LIMIT 1) ORDER BY lastModifiedAtDevice DESC LIMIT 1") suspend fun todayReport(date: String): ReportWithAnswers?
-    @Query("SELECT * FROM reports WHERE syncStatus = 'LOCAL_DRAFT' AND ownerUserId = (SELECT id FROM users LIMIT 1) LIMIT 1") suspend fun openReport(): MaintenanceReportEntity?
+    @Transaction @Query("SELECT * FROM reports WHERE reportDate = :date AND (ownerUserId = (SELECT id FROM users LIMIT 1) OR clientReportId = (SELECT value FROM metadata WHERE `key` = 'server_report_id')) ORDER BY (clientReportId = COALESCE((SELECT value FROM metadata WHERE `key` = 'server_report_id'), '')) DESC, completedAtDevice DESC, lastModifiedAtDevice DESC LIMIT 1") suspend fun todayReport(date: String): ReportWithAnswers?
+    @Query("SELECT * FROM reports WHERE syncStatus = 'LOCAL_DRAFT' AND ownerUserId = :ownerUserId LIMIT 1") suspend fun openReport(ownerUserId: Int): MaintenanceReportEntity?
     @Transaction @Query("SELECT * FROM checklist_sections WHERE templateId = :templateId ORDER BY sequence") suspend fun checklist(templateId: Int): List<SectionWithItems>
-    @Transaction @Query("SELECT * FROM reports WHERE ownerUserId = (SELECT id FROM users LIMIT 1) AND syncStatus IN ('PENDING_SYNC','SYNCING','SYNC_ERROR') AND completedAtDevice IS NOT NULL ORDER BY reportDate ASC, completedAtDevice ASC") suspend fun pendingReports(): List<ReportWithAnswers>
+    @Transaction @Query("SELECT * FROM reports WHERE ownerUserId = (SELECT id FROM users LIMIT 1) AND clientReportId IN (SELECT clientReportId FROM sync_queue) AND syncStatus IN ('PENDING_SYNC','SYNCING','SYNC_ERROR') AND completedAtDevice IS NOT NULL ORDER BY reportDate ASC, completedAtDevice ASC") suspend fun pendingReports(): List<ReportWithAnswers>
     @Query("UPDATE reports SET syncStatus = :status, serverId = COALESCE(:serverId, serverId), lastError = :error WHERE clientReportId = :id") suspend fun setReportStatus(id: String, status: String, serverId: Int? = null, error: String? = null)
     @Query("UPDATE reports SET cleanerName = :cleaner, mechanicalTechnician = :mechanical, electricalTechnician = :electrical, maintenanceManager = :manager, lastModifiedAtDevice = :modifiedAt WHERE clientReportId = :id") suspend fun updatePersonnel(id: String, cleaner: String, mechanical: String, electrical: String, manager: String, modifiedAt: String)
     @Query("DELETE FROM sync_queue WHERE clientReportId = :id") suspend fun dequeue(id: String)
@@ -48,6 +48,7 @@ interface MaintenanceDao {
     @Query("DELETE FROM checklist_sections") suspend fun clearSections()
     @Query("DELETE FROM checklist_items") suspend fun clearItems()
     @Query("DELETE FROM current_maintenance") suspend fun clearCurrent()
+    @Query("DELETE FROM metadata") suspend fun clearMetadata()
     @Query("DELETE FROM reports WHERE clientReportId = :id") suspend fun deleteReport(id: String)
     @Query("DELETE FROM reports WHERE syncStatus = 'LOCAL_DRAFT' AND reportDate = :date AND ownerUserId = (SELECT id FROM users LIMIT 1)") suspend fun deleteDraftsForDate(date: String)
     @Query("DELETE FROM reports WHERE reportDate = :date AND isLocked = 0 AND ownerUserId = (SELECT id FROM users LIMIT 1)") suspend fun deleteUnlockedReportsForDate(date: String)
