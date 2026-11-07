@@ -206,6 +206,7 @@ class MaintenanceRepositoryImpl @Inject constructor(
             dao.putMetadata(MetadataEntity("last_sync", OffsetDateTime.now(clock).toString()))
             dao.putMetadata(MetadataEntity("selection_mode", value.selectionMode))
             dao.putMetadata(MetadataEntity("can_submit_report", value.canSubmitReport.toString()))
+            dao.putMetadata(MetadataEntity("maintenance_permission_reason", value.maintenanceDenialReason))
         }
         tokens.bindUser(value.user.id)
         AppResult.Success(Unit)
@@ -225,6 +226,12 @@ class MaintenanceRepositoryImpl @Inject constructor(
         val today = LocalDate.now(clock.withZone(cairo))
         if (today.dayOfWeek == DayOfWeek.FRIDAY) return AppResult.Error("الجمعة عطلة الصيانة الأسبوعية. ستظهر الماكينة نفسها في يوم العمل التالي.")
         val todayStr = today.toString()
+        // The account/rotation may have been corrected since our last cache.
+        // Refresh a cached denial before preventing a new inspection.
+        var permissionRefreshError: AppResult.Error? = null
+        if (morningWindowOpen() && dao.observeMetadata("can_submit_report").first() != "true") {
+            permissionRefreshError = bootstrapInternal() as? AppResult.Error
+        }
         val home = observeHome().first()
         val snapshot = home.daily ?: return AppResult.Error("قم بمزامنة بيانات الحساب الحالي أولًا.")
 
@@ -234,8 +241,15 @@ class MaintenanceRepositoryImpl @Inject constructor(
         if (existingReport != null && (existingReport.report.completedAtDevice != null || !canEdit(existingReport.report))) {
             return AppResult.Success(existingReport.toDomain(today, !canEdit(existingReport.report)))
         }
-        if (!morningWindowOpen() || dao.observeMetadata("can_submit_report").first() != "true") {
-            return AppResult.Error("تسجيل الصيانة متاح لمشرف الوردية الصباحية وحتى ساعتين بعد نهايتها فقط.")
+        if (!morningWindowOpen()) {
+            val deviceTime = java.time.LocalTime.now(clock.withZone(cairo)).withNano(0)
+            return AppResult.Error("وقت تسجيل الصيانة من 7 صباحًا حتى 5 مساءً بتوقيت القاهرة. وقت الهاتف الحالي: $deviceTime. تحقق من ضبط تاريخ الهاتف ووقته تلقائيًا.")
+        }
+        if (dao.observeMetadata("can_submit_report").first() != "true") {
+            return permissionRefreshError ?: AppResult.Error(
+                dao.observeMetadata("maintenance_permission_reason").first()?.takeIf { it.isNotBlank() }
+                    ?: "الخادم لم يمنح الحساب صلاحية تسجيل الصيانة. حدّث بيانات الحساب وراجع تعيين الوردية والمصنع في لوحة التحكم."
+            )
         }
         if (existingReport != null) {
             // If the report was already completed, return it

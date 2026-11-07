@@ -69,6 +69,8 @@ import kotlinx.serialization.Serializable
 @Serializable data class BootstrapDto(
     val user: UserDto,
     @SerialName("can_submit_report") val canSubmitReport: Boolean = true,
+    @SerialName("effective_shift") val effectiveShift: String? = null,
+    @SerialName("maintenance_denial_reason") val maintenanceDenialReason: String = "",
     val factory: FactoryDto = user.factory,
     @SerialName("active_assets") val assets: List<AssetDto> = emptyList(),
     @SerialName("checklist_templates") val checklistTemplates: List<ChecklistTemplateDto> = emptyList(),

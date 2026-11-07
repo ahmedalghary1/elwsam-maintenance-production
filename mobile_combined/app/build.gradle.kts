@@ -14,8 +14,8 @@ android {
         applicationId = "com.elwsam.operations"
         minSdk = 23
         targetSdk = 34
-        versionCode = 5
-        versionName = "1.1.0"
+        versionCode = 6
+        versionName = "1.1.1"
         buildConfigField("String", "API_BASE_URL", "\"https://elwsam.pythonanywhere.com/\"")
     }
     buildTypes {

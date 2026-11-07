@@ -36,7 +36,7 @@ class MaintenanceAccountTest {
         listOf(MaintenanceAnswerEntity("saved-uuid", 7, true, "saved answer"))
     )
 
-    private fun repository(report: ReportWithAnswers = saved, cachedUserId: Int = 2): MaintenanceRepositoryImpl {
+    private fun repository(report: ReportWithAnswers = saved, cachedUserId: Int = 2, at: Clock = clock): MaintenanceRepositoryImpl {
         every { tokens.userId } returns activeUser
         coEvery { tokens.hasSession() } returns true
         every { dao.observeUser() } returns flowOf(UserEntity(cachedUserId, "phone-$cachedUserId", "GENERAL_SUPERVISOR", 1, "User $cachedUserId"))
@@ -49,7 +49,7 @@ class MaintenanceAccountTest {
         every { dao.observeMetadata("server_report_id") } returns flowOf(report.report.clientReportId)
         coEvery { dao.checklist(6) } returns listOf(SectionWithItems(ChecklistSectionEntity(8, 6, "section", 1), listOf(ChecklistItemEntity(7, 8, "item", 1))))
         coEvery { dao.todayReport("2026-11-02") } returns report
-        return MaintenanceRepositoryImpl(db, api, clock, MaintenanceSession(db, tokens), tokens)
+        return MaintenanceRepositoryImpl(db, api, at, MaintenanceSession(db, tokens), tokens)
     }
 
     @Test fun completedReportOpensAfterMorningDeadlineWithAnswersAndWithoutUpload() = runTest {
@@ -107,5 +107,37 @@ class MaintenanceAccountTest {
     @Test fun forbiddenIsNotAConflictAndMustNotOfferToResetTheReport() = runTest {
         val failed = saved.copy(report = saved.report.copy(syncStatus = SyncStatus.SYNC_ERROR.name, lastError = "Permission denied (HTTP 403)"))
         assertFalse(repository(failed).observeHome().first().daily!!.report!!.requiresReset)
+    }
+
+    @Test fun morningDraftOpensDuringShiftAndTwoHourGracePeriod() = runTest {
+        val draft = saved.copy(report = saved.report.copy(completedAtDevice = null, syncStatus = SyncStatus.LOCAL_DRAFT.name))
+        // Cairo is UTC+2 on this date: 07:00, 10:00 and exactly 17:00.
+        for (instant in listOf("2026-11-02T05:00:00Z", "2026-11-02T08:00:00Z", "2026-11-02T15:00:00Z")) {
+            val repo = repository(draft, at = Clock.fixed(Instant.parse(instant), ZoneId.of("UTC")))
+            val result = repo.startOrLoadToday()
+            assertTrue(result is AppResult.Success)
+            assertFalse((result as AppResult.Success).value.isLocked)
+        }
+    }
+
+    @Test fun cachedPermissionDenialIsRefreshedBeforeBlockingANewMorningInspection() = runTest {
+        val repo = repository(at = Clock.fixed(Instant.parse("2026-11-02T08:00:00Z"), ZoneId.of("UTC")))
+        every { dao.observeMetadata("can_submit_report") } returns flowOf("false")
+        coEvery { dao.todayReport("2026-11-02") } returns null
+        coEvery { api.bootstrap() } throws IOException("offline")
+        val result = repo.startOrLoadToday()
+        assertTrue(result is AppResult.Error)
+        assertFalse((result as AppResult.Error).message.contains("ساعتين"))
+        coVerify(exactly = 1) { api.bootstrap() }
+        coVerify(exactly = 0) { dao.deleteReport(any()) }
+        coVerify(exactly = 0) { dao.upsertReport(any()) }
+    }
+
+    @Test fun outsideWindowMessageIdentifiesThePhoneClockInsteadOfClaimingWrongAccountShift() = runTest {
+        val repo = repository(at = Clock.fixed(Instant.parse("2026-11-02T15:01:00Z"), ZoneId.of("UTC")))
+        coEvery { dao.todayReport("2026-11-02") } returns null
+        val result = repo.startOrLoadToday() as AppResult.Error
+        assertTrue(result.message.contains("17:01"))
+        assertTrue(result.message.contains("وقت الهاتف"))
     }
 }
