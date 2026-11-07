@@ -2,6 +2,10 @@ package com.maintenance.supervisor.data.repository
 
 import com.maintenance.supervisor.data.local.*
 import com.maintenance.supervisor.data.remote.MaintenanceApi
+import com.maintenance.supervisor.data.remote.BatchSyncResponse
+import com.maintenance.supervisor.domain.model.requiresReset
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.ResponseBody.Companion.toResponseBody
 import com.maintenance.supervisor.data.security.MaintenanceSession
 import com.maintenance.supervisor.data.security.TokenStore
 import com.maintenance.supervisor.domain.model.SyncStatus
@@ -84,5 +88,24 @@ class MaintenanceAccountTest {
         activeUser.value = null
         assertNull(repo.observeHome().first().user)
         assertNull(repo.observeHome().first().daily)
+    }
+
+    @Test fun forbiddenUploadPreservesReportAndQueueAndDisplaysPermissionReason() = runTest {
+        val pending = saved.copy(report = saved.report.copy(syncStatus = SyncStatus.PENDING_SYNC.name))
+        val repo = repository(pending)
+        coEvery { dao.pendingReports() } returns listOf(pending)
+        coEvery { api.syncReports(any()) } throws retrofit2.HttpException(retrofit2.Response.error<BatchSyncResponse>(
+            403, """{"detail":"Account has no maintenance permission."}""".toResponseBody("application/json".toMediaType())))
+        coEvery { api.bootstrap() } throws IOException("offline")
+        assertTrue(repo.sync() is AppResult.Error)
+        coVerify { dao.setReportStatus("saved-uuid", SyncStatus.SYNC_ERROR.name, error = match { it?.contains("Account has no maintenance permission.") == true && it.contains("HTTP 403") }) }
+        coVerify(exactly = 0) { dao.dequeue(any()) }
+        coVerify(exactly = 0) { dao.deleteReport(any()) }
+        coVerify(exactly = 0) { dao.upsertAnswers(any()) }
+    }
+
+    @Test fun forbiddenIsNotAConflictAndMustNotOfferToResetTheReport() = runTest {
+        val failed = saved.copy(report = saved.report.copy(syncStatus = SyncStatus.SYNC_ERROR.name, lastError = "Permission denied (HTTP 403)"))
+        assertFalse(repository(failed).observeHome().first().daily!!.report!!.requiresReset)
     }
 }

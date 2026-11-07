@@ -196,6 +196,9 @@ private fun ModulePicker(session: UnifiedSession, loading: Boolean, onLogout: ()
             }
 
             Column(Modifier.padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                OutlinedButton(onClick = { context.startActivity(Intent(context, com.elwsam.operations.updates.UpdateActivity::class.java)) }, modifier = Modifier.fillMaxWidth()) {
+                    Text("التحقق من تحديث التطبيق")
+                }
                 if (canMaintain) {
                     ModuleCard(
                         title = "الصيانة الدورية",

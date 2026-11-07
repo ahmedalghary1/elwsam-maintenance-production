@@ -212,7 +212,7 @@ class MaintenanceRepositoryImpl @Inject constructor(
     } catch (t: Throwable) {
         if (t is CancellationException) throw t
         if (t is retrofit2.HttpException && t.code() == 403) {
-            AppResult.Error("لا توجد صلاحية للوصول إلى صيانة هذا المصنع.", t)
+            AppResult.Error(maintenanceHttpError(t.code(), t.response()?.errorBody()?.string()), t)
         } else AppResult.Error("تعذر تحميل بيانات المصنع. يمكنك متابعة العمل بالبيانات المحفوظة.", t)
     }
 
@@ -426,7 +426,7 @@ class MaintenanceRepositoryImpl @Inject constructor(
                         result.status.lowercase() in setOf("conflict") -> {
                             // A conflict is not a successful upload. Preserve the
                             // local answers and show the server explanation.
-                            dao.setReportStatus(local.report.clientReportId, SyncStatus.SYNC_ERROR.name, result.id, result.detail ?: "تعارض التقرير مع بيانات الخادم")
+                            dao.setReportStatus(local.report.clientReportId, SyncStatus.SYNC_ERROR.name, result.id, "تعارض التقرير: ${result.detail ?: "تعارض مع بيانات الخادم"}")
                             dao.dequeue(local.report.clientReportId)
                         }
                         result.status.lowercase() == "rejected" -> {
@@ -437,7 +437,13 @@ class MaintenanceRepositoryImpl @Inject constructor(
                         else -> dao.setReportStatus(local.report.clientReportId, SyncStatus.SYNC_ERROR.name, error = result.detail ?: result.status)
                     }
                 } catch (t: retrofit2.HttpException) {
-                    if (t.code() == 409) {
+                    if (t.code() == 401 || t.code() == 403) {
+                        val message = maintenanceHttpError(t.code(), t.response()?.errorBody()?.string())
+                        retryableFailure = IllegalStateException(message, t)
+                        // Keep the UUID, all answers and the queue. A corrected account/server
+                        // permission can retry without deleting or recreating the inspection.
+                        dao.setReportStatus(local.report.clientReportId, SyncStatus.SYNC_ERROR.name, error = message)
+                    } else if (t.code() == 409) {
                         dao.setReportStatus(local.report.clientReportId, SyncStatus.SYNC_ERROR.name, error = "تعارض التقرير مع بيانات الخادم")
                         dao.dequeue(local.report.clientReportId)
                     } else if (t.code() == 400) {

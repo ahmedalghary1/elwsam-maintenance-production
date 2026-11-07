@@ -14,8 +14,9 @@ android {
         applicationId = "com.elwsam.operations"
         minSdk = 23
         targetSdk = 34
-        versionCode = 4
-        versionName = "1.0.3"
+        versionCode = 5
+        versionName = "1.1.0"
+        buildConfigField("String", "API_BASE_URL", "\"https://elwsam.pythonanywhere.com/\"")
     }
     buildTypes {
         debug { isMinifyEnabled = false }
@@ -26,7 +27,7 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
     packaging { jniLibs.useLegacyPackaging = true }
     compileOptions {
         isCoreLibraryDesugaringEnabled = true
@@ -51,6 +52,8 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.datastore:datastore-preferences:1.1.7")
     implementation("androidx.work:work-runtime-ktx:2.11.2")
+    implementation("com.squareup.okhttp3:okhttp:5.1.0")
+    testImplementation("junit:junit:4.13.2")
     implementation("com.google.dagger:hilt-android:2.57.2")
     ksp("com.google.dagger:hilt-compiler:2.57.2")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")

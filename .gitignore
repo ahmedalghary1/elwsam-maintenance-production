@@ -39,6 +39,7 @@ mobile_production/app/build/
 
 # Gradle
 .gradle/
+.kotlin/
 /local.properties
 mobile/local.properties
 mobile_production/local.properties

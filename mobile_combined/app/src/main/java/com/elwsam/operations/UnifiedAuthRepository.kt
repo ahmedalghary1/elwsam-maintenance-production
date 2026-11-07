@@ -6,13 +6,15 @@ import com.production.supervisor.data.repository.AuthRepository
 import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 import javax.inject.Singleton
+import com.elwsam.operations.updates.UpdateCoordinator
 
 @Singleton
 class UnifiedAuthRepository @Inject constructor(
     private val productionAuth: AuthRepository,
     private val productionTokens: TokenManager,
     private val maintenanceSession: MaintenanceSession,
-    private val sessions: SessionStore
+    private val sessions: SessionStore,
+    private val updates: UpdateCoordinator
 ) {
     val session = sessions.session
 
@@ -43,6 +45,7 @@ class UnifiedAuthRepository @Inject constructor(
         }
         val name = productionTokens.userNameFlow.first().orEmpty().ifBlank { phone.trim() }
         sessions.save(role, name)
+        updates.check(force = true)
         return Result.success(Unit)
     }
 

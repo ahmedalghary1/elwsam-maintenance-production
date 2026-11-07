@@ -5,6 +5,10 @@ import java.time.OffsetDateTime
 
 enum class SyncStatus { LOCAL_DRAFT, PENDING_SYNC, SYNCING, SYNCED, SYNC_ERROR }
 
+val MaintenanceReport.requiresReset: Boolean
+    get() = status == SyncStatus.SYNC_ERROR &&
+        (lastError?.startsWith("تعارض التقرير") == true || lastError?.contains("الماكينة لا تطابق") == true)
+
 data class Factory(val id: Int, val name: String, val code: String)
 
 data class User(

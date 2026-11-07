@@ -19,6 +19,7 @@ import com.maintenance.supervisor.domain.model.Asset
 import com.maintenance.supervisor.domain.model.ChecklistItem
 import com.maintenance.supervisor.domain.model.EmergencyMaintenance
 import com.maintenance.supervisor.domain.model.SyncStatus
+import com.maintenance.supervisor.domain.model.requiresReset
 import com.maintenance.supervisor.ui.InspectionViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -34,7 +35,7 @@ import com.maintenance.supervisor.ui.InspectionViewModel
             Text(daily?.asset?.maintenanceTitle ?: "الصيانة الدورية", fontWeight = FontWeight.Bold)
             Text(
                 when {
-                    isError -> "تعارض مع الخادم - يجب إعادة التعيين"
+                    isError -> "لم تكتمل مزامنة التقرير؛ بياناتك محفوظة"
                     isLocked -> "تقرير مقفل - للعرض فقط"
                     else -> "يُحفظ كل تغيير تلقائيًا"
                 },
@@ -45,7 +46,7 @@ import com.maintenance.supervisor.ui.InspectionViewModel
             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "رجوع") } },
             colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface))
     }, bottomBar = {
-        if (isError) {
+        if (isError && report?.requiresReset == true && !isLocked) {
             Surface(shadowElevation = 10.dp, color = MaterialTheme.colorScheme.surface) {
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
@@ -85,7 +86,7 @@ import com.maintenance.supervisor.ui.InspectionViewModel
     }) { padding ->
         if (daily == null || report == null) Box(Modifier.padding(padding).fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         else LazyColumn(Modifier.padding(padding).fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (isError) {
+            if (isError && report.requiresReset && !isLocked) {
                 item(key = "conflict-warning-card") {
                     Card(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),

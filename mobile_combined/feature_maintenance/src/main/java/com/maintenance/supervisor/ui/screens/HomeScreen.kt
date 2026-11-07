@@ -17,6 +17,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import com.maintenance.supervisor.domain.model.DailyMaintenance
 import com.maintenance.supervisor.domain.model.SyncStatus
+import com.maintenance.supervisor.domain.model.requiresReset
 import com.maintenance.supervisor.ui.HomeViewModel
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -117,7 +118,7 @@ import java.util.Locale
                     }
                 }
             }
-            if (daily?.report?.status == SyncStatus.SYNC_ERROR) {
+            if (daily?.report?.requiresReset == true && daily.report.isLocked != true) {
                 item {
                     Card(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
@@ -346,7 +347,7 @@ import java.util.Locale
             HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = .55f))
             Spacer(Modifier.height(16.dp))
 
-            if (isError) {
+            if (isError && report?.requiresReset == true && !locked) {
                 Button(
                     onClick = onReset,
                     modifier = Modifier.fillMaxWidth().height(56.dp),
