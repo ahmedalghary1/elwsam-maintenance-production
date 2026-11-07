@@ -11,7 +11,6 @@ import android.os.Build
 import androidx.core.content.pm.PackageInfoCompat
 import com.elwsam.operations.BuildConfig
 import com.elwsam.operations.MainActivity
-import com.production.supervisor.data.local.datastore.TokenManager
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -36,7 +35,7 @@ data class UpdateState(val stage: String = "current", val progress: Int = 0, val
 @Singleton
 class UpdateCoordinator @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val tokens: TokenManager
+    private val presence: DevicePresence
 ) {
     private val prefs = context.getSharedPreferences("app_updates", Context.MODE_PRIVATE)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -77,16 +76,21 @@ class UpdateCoordinator @Inject constructor(
     }
 
     fun onResume(activity: Activity) {
+        presence.onResume(activity)
         foreground = WeakReference(activity)
         check()
         showIfSafe()
     }
 
     fun onPause(activity: Activity) {
+        presence.onPause(activity)
         if (foreground.get() === activity) foreground.clear()
     }
 
     fun check(force: Boolean = false) { scope.launch { checkNow(force) } }
+
+    fun accountChanged(userId: Int) { presence.onLogin(userId); check(force = true) }
+    fun accountLoggedOut() { presence.onLogout() }
 
     suspend fun checkNow(force: Boolean = false): Boolean = withContext(Dispatchers.IO) {
         if (!mutex.tryLock()) return@withContext true
@@ -106,13 +110,15 @@ class UpdateCoordinator @Inject constructor(
                 setState("current", message = "التطبيق محدّث.")
             }
             heartbeat()
-            val release = request("latest/").optJSONObject("release")
+            val latest = request("latest/")
+            val release = latest.optJSONObject("release")
             if (release == null) {
                 // A withdrawn update must no longer be installed from the cached APK.
                 abandonSession()
                 prefs.edit().remove("release").apply()
                 apkFile.delete()
-                setState("current", message = "التطبيق محدّث.")
+                setState("current", message = if (latest.optBoolean("updates_enabled", true)) "التطبيق محدّث."
+                    else "التحديثات موقوفة لهذا الجهاز بواسطة المسؤول.")
                 return@withContext true
             }
             UpdatePolicy.requireValidMetadata(installedVersion(), release.getLong("version_code"), release.getLong("size_bytes"), release.getString("sha256"))
@@ -184,17 +190,7 @@ class UpdateCoordinator @Inject constructor(
     }
 
     private suspend fun register(): Boolean {
-        val userId = tokens.getUserId()
-        val access = tokens.getAccessTokenValue()
-        if (userId != null && !access.isNullOrBlank() && prefs.getInt("registered_user", -1) != userId) {
-            val body = deviceInfo().put("device_id", prefs.getString("device_id", ""))
-                .put("device_secret", prefs.getString("secret", ""))
-            val response = rawRequest("register/", body, access)
-            response.use {
-                if (it.isSuccessful) prefs.edit().putBoolean("registered", true).putInt("registered_user", userId).commit()
-            }
-        }
-        return prefs.getBoolean("registered", false)
+        return presence.ensureRegistered()
     }
 
     private fun deviceInfo(): JSONObject {
@@ -206,12 +202,10 @@ class UpdateCoordinator @Inject constructor(
 
     private fun installedVersion() = PackageInfoCompat.getLongVersionCode(context.packageManager.getPackageInfo(context.packageName, 0))
 
-    private fun rawRequest(path: String, body: JSONObject? = null, access: String? = null): okhttp3.Response {
+    private fun rawRequest(path: String, body: JSONObject? = null): okhttp3.Response {
         val builder = Request.Builder().url(BuildConfig.API_BASE_URL + "api/v1/updates/" + path)
-        if (access != null) builder.header("Authorization", "Bearer $access") else {
-            builder.header("X-Device-ID", prefs.getString("device_id", "")!!)
-                .header("X-Device-Token", prefs.getString("secret", "")!!)
-        }
+        builder.header("X-Device-ID", prefs.getString("device_id", "")!!)
+            .header("X-Device-Token", prefs.getString("secret", "")!!)
         if (body != null) builder.post(body.toString().toRequestBody("application/json".toMediaType()))
         return client.newCall(builder.build()).execute()
     }

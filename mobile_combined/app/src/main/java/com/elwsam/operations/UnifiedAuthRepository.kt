@@ -45,12 +45,13 @@ class UnifiedAuthRepository @Inject constructor(
         }
         val name = productionTokens.userNameFlow.first().orEmpty().ifBlank { phone.trim() }
         sessions.save(role, name)
-        updates.check(force = true)
+        updates.accountChanged(userId)
         return Result.success(Unit)
     }
 
     suspend fun logout() {
         productionAuth.logout()
+        updates.accountLoggedOut()
         maintenanceSession.clear()
         sessions.clear()
     }
